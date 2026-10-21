@@ -5,7 +5,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
 use std::path::Path;
 
-use geko_core::ports::{Checksum, DownloadRequest, Downloader};
+use crate::download::{Checksum, DownloadRequest, Downloader};
 use sha2::{Digest, Sha256};
 
 const BODY: &[u8] = b"geko conformance payload\n";

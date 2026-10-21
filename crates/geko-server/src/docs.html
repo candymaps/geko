@@ -1,4 +1,8 @@
-<!doctype html>
+    // The reference of geko and those of the active modules, filled in by the server.
+    const specs = __SPECS__;
+    SwaggerUIBundle({ urls: specs, "urls.primaryName": specs.length > 1 ? specs[1].name : specs[0].name, dom_id: "#swagger-ui",
+                      layout: "StandaloneLayout", presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset] });
+    document.getElementById("bar").hidden = !__HOME__;<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -14,15 +18,20 @@
   </style>
 </head>
 <body>
-  <!-- The demo is the geocoder's: shown only when that module is active. -->
+  <!-- The page of a module (the demo of the geocoder), shown when one is active. -->
   <nav id="bar" hidden><a href="/">← Demo</a></nav>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
   <script>
-    SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#swagger-ui" });
-    fetch("/health").then(r => r.json()).then(h => {
-      if ((h.modules || []).includes("geocoder")) document.getElementById("bar").hidden = false;
-    }).catch(() => {});
+    // The reference of geko and those of the active modules, filled in by the server; the first
+    // module's is shown first.
+    const specs = __SPECS__;
+    SwaggerUIBundle({
+      urls: specs, "urls.primaryName": specs[Math.min(1, specs.length - 1)].name, dom_id: "#swagger-ui",
+      layout: "StandaloneLayout", presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+    });
+    document.getElementById("bar").hidden = !__HOME__;
   </script>
 </body>
 </html>

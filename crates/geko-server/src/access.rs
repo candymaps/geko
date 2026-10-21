@@ -30,12 +30,14 @@ pub struct Access {
 
 pub struct Guard {
     access: Access,
+    /// Paths answered without a key besides those of every geko: the pages of the modules.
+    public: std::collections::HashSet<String>,
     buckets: Mutex<HashMap<IpAddr, (f64, Instant)>>,
 }
 
 impl Guard {
-    pub fn new(access: Access) -> Self {
-        Self { access, buckets: Mutex::new(HashMap::new()) }
+    pub fn new(access: Access, public: std::collections::HashSet<String>) -> Self {
+        Self { access, public, buckets: Mutex::new(HashMap::new()) }
     }
 
     fn allowed_origin(&self, headers: &HeaderMap) -> Option<HeaderValue> {
@@ -45,7 +47,8 @@ impl Guard {
     }
 
     fn authorized(&self, request: &Request) -> bool {
-        let public = matches!(request.uri().path(), "/" | "/health") || request.uri().path().starts_with("/v1/attribution");
+        let path = request.uri().path();
+        let public = matches!(path, "/" | "/health") || path.starts_with("/v1/attribution") || self.public.contains(path);
         if self.access.api_keys.is_empty() || public {
             return true;
         }
@@ -113,7 +116,7 @@ mod tests {
 
     #[test]
     fn the_bucket_allows_the_burst_then_the_rate() {
-        let guard = Guard::new(Access { rate_per_s: 1.0, burst: 3.0, ..Default::default() });
+        let guard = Guard::new(Access { rate_per_s: 1.0, burst: 3.0, ..Default::default() }, Default::default());
         let ip: IpAddr = [10, 0, 0, 1].into();
         assert!((0..3).all(|_| guard.take(ip)), "the burst");
         assert!(!guard.take(ip), "then empty");
@@ -122,7 +125,7 @@ mod tests {
 
     #[test]
     fn no_limit_by_default() {
-        let guard = Guard::new(Access::default());
+        let guard = Guard::new(Access::default(), Default::default());
         assert!((0..1000).all(|_| guard.take([10, 0, 0, 1].into())));
     }
 }

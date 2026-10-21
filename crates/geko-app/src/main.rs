@@ -1,14 +1,14 @@
+mod bundle;
 mod config;
 mod modules;
-mod plan;
-mod sources;
-mod stages;
+mod run;
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 use anyhow::Context;
 use clap::{Parser, Subcommand};
-use geko_server::ModuleName;
+use geko_module_sdk::module::{Module, ModuleName};
 
 use crate::config::Config;
 
@@ -48,45 +48,14 @@ enum Command {
         #[arg(long)]
         refresh: bool,
     },
-    /// Show how a query is interpreted (debugging aid).
-    Parse {
-        text: String,
-        #[arg(long, default_value = "ES")]
-        country: geko_core::country::CountryCode,
-    },
-    /// Search the built segment from the command line (debugging aid).
-    Query {
-        text: String,
-        #[arg(long, default_value = "ES")]
-        country: geko_core::country::CountryCode,
-        /// Treat the last word as a prefix being typed.
-        #[arg(long)]
-        autocomplete: bool,
-        /// Bias results towards "lat,lon".
-        #[arg(long)]
-        focus: Option<String>,
-        #[arg(long, default_value_t = 10)]
-        size: usize,
-        /// Print the time of each interpretation of the query (stderr).
-        #[arg(long)]
-        debug: bool,
-    },
-    /// Reverse geocode a point from the command line (debugging aid).
-    Reverse {
-        lat: f64,
-        lon: f64,
-        #[arg(long, default_value = "ES")]
-        country: geko_core::country::CountryCode,
-        #[arg(long, default_value_t = 5)]
-        size: usize,
-    },
     /// Serve the active modules.
     Serve {
         #[arg(long)]
         listen: Option<SocketAddr>,
     },
-    /// Serve, and build in the background what the configuration asks for: now, and again every
-    /// `[data] max_age_days`. The bundle being served stays until the new one is published.
+    /// Serve, and build in the background what the configuration asks for: now, and again when
+    /// a module asks for it (the geocoder: every `[data] max_age_days`). The bundle being served
+    /// stays until the new one is published.
     Up {
         #[arg(long)]
         force: bool,
@@ -105,6 +74,10 @@ enum Command {
         #[command(subcommand)]
         what: Option<Purge>,
     },
+    /// A command of an active module: `geko geocoder query "Calle Mayor 5"`; `geko <module>` lists
+    /// them.
+    #[command(external_subcommand)]
+    Module(Vec<String>),
 }
 
 #[derive(Subcommand, Clone, Copy)]
@@ -112,22 +85,23 @@ enum Purge {
     /// The downloads and work files of the countries, regions and sources that the configuration
     /// no longer asks for (what `build --purge` removes, without building).
     Data,
-    /// The downloaded country packs of the countries outside the scope.
-    CountryPacks {
+    /// The data packages the modules downloaded (the country packs of the geocoder) for the
+    /// countries outside the scope.
+    Packages {
         /// All of them: they are downloaded again when a build needs them.
         #[arg(long)]
         all: bool,
     },
 }
 
-fn serve(config: &Config, active: &[geko_core::module::ModuleName], listen: Option<SocketAddr>) -> anyhow::Result<()> {
-    let instances = active.iter().map(|m| modules::instantiate(*m, config)).collect::<Result<Vec<_>, _>>()?;
+fn serve(config: &Config, modules: &[Arc<dyn Module>], listen: Option<SocketAddr>) -> anyhow::Result<()> {
+    let mounted = modules.iter().map(|m| geko_server::Mounted::new(Arc::clone(m))).collect();
     let pull = (!config.serve.bundles_url.is_empty()).then(|| {
         let (url, dir, keep) = (config.serve.bundles_url.clone(), config.bundles_dir(), config.build.keep);
         // Bundles are not sources: a serving machine pulls them even when it never downloads data.
         let downloader = geko_fetch::HttpDownloader::new(geko_fetch::HttpDownloaderConfig::default());
-        let pull: geko_server::Pull = std::sync::Arc::new(move || {
-            if let Some(version) = geko_build::bundle::pull(&url, &dir, &downloader, keep)? {
+        let pull: geko_server::Pull = Arc::new(move || {
+            if let Some(version) = bundle::pull(&url, &dir, &downloader, keep)? {
                 tracing::info!(%version, %url, "bundle pulled");
             }
             Ok(())
@@ -147,7 +121,43 @@ fn serve(config: &Config, active: &[geko_core::module::ModuleName], listen: Opti
         rate_per_s: s.rate_limit_per_s,
         burst: if s.rate_limit_burst > 0.0 { s.rate_limit_burst } else { s.rate_limit_per_s * 2.0 },
     };
-    tokio::runtime::Runtime::new()?.block_on(geko_server::serve(addr, instances, Some(bundles), access, Some(s.attribution_contact.clone()).filter(|c| !c.is_empty()))).context("server failed")
+    let contact = Some(s.attribution_contact.clone()).filter(|c| !c.is_empty());
+    tokio::runtime::Runtime::new()?.block_on(geko_server::serve(addr, mounted, Some(bundles), access, contact)).context("server failed")
+}
+
+/// Every active module prepares what the commands that build need (the geocoder, its country
+/// packs and sources).
+fn prepare(modules: &[Arc<dyn Module>]) -> anyhow::Result<()> {
+    for m in modules {
+        print!("{}", m.prepare()?);
+    }
+    Ok(())
+}
+
+fn purge(modules: &[Arc<dyn Module>], what: geko_module_sdk::module::Purge) -> anyhow::Result<()> {
+    for m in modules {
+        print!("{}", m.purge(what)?);
+    }
+    Ok(())
+}
+
+/// `geko <module> <command> …`: a command of an active module.
+fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Result<()> {
+    let [name, rest @ ..] = args else { unreachable!("clap gives the name of the subcommand") };
+    let Some(module) = modules.iter().find(|m| m.describe().name.as_str() == name) else {
+        let active: Vec<String> = modules.iter().map(|m| m.describe().name.to_string()).collect();
+        anyhow::bail!("unknown command `{name}`: neither a command of geko (geko --help) nor an active module ({})", active.join(", "));
+    };
+    let Some((command, args)) = rest.split_first() else {
+        let described = module.describe();
+        println!("Commands of the {name} module (geko {name} <command> --help):");
+        for c in &described.commands {
+            println!("  {:<12} {}", c.name, c.about);
+        }
+        return Ok(());
+    };
+    print!("{}", module.command(command, args)?);
+    Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
@@ -158,145 +168,57 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let path = config::config_path();
     let config = if path.exists() { Config::load(&path)? } else { Config::default() };
-    // GEKO_PACKS names packs that are not downloaded: those of the repository, for the checks.
-    let given_packs = std::env::var_os("GEKO_PACKS");
-    let packs_dir = given_packs.clone().map_or_else(|| config.data.dir.join("packs"), std::path::PathBuf::from);
-    geko_country_pack::init(packs_dir.clone());
-    let active = modules::resolve(&config.modules, cli.modules.as_deref(), modules::compiled)?;
-    // The commands that build download the packs of the scope first: what they prepare needs them.
-    let ensure_packs = || -> anyhow::Result<()> {
-        if given_packs.is_none() {
-            print!("{}", plan::ensure_packs(&config, &packs_dir)?);
-        }
-        Ok(())
-    };
+    let linked = modules::linked();
+    let active = modules::resolve(&config, cli.modules.as_deref(), &linked)?;
+    let modules = modules::open(&config, &path, &active, &linked)?;
 
     match cli.command {
         Command::Plan => {
-            ensure_packs()?;
-            let prepared = plan::prepare(&config, &active, &sources::registry())?;
-            print!("{}", plan::plan(&config, &active, &prepared, &plan::downloader(&config, false)));
+            let names: Vec<_> = active.iter().map(|m| m.as_str()).collect();
+            println!("Modules: {}", names.join(", "));
+            prepare(&modules)?;
+            for m in &modules {
+                print!("{}", m.plan()?);
+            }
         }
         Command::Fetch { refresh } => {
-            ensure_packs()?;
-            let prepared = plan::prepare(&config, &active, &sources::registry())?;
-            print!("{}", plan::fetch(&config, &prepared, &plan::downloader(&config, refresh))?);
-        }
-        Command::Build { force, purge, refresh } => {
-            ensure_packs()?;
-            let prepared = plan::prepare(&config, &active, &sources::registry())?;
-            if purge {
-                print!("{}", plan::purge(&config, &prepared)?);
-            }
-            print!("{}", plan::build(&config, &active, &prepared, &plan::downloader(&config, refresh), force)?);
-        }
-        Command::Parse { text, country } => {
-            let parsed = sources::parser(country)?.parse(&text)?;
-            for i in parsed.interpretations {
-                println!("{:>5.1}%  {:?}", i.probability * 100.0, i.kind);
+            prepare(&modules)?;
+            for m in &modules {
+                print!("{}", m.fetch(refresh)?);
             }
         }
-        Command::Query { text, country, autocomplete, focus, size, debug } => {
-            let dir = plan::segment_dir(&config, country).join("geocode");
-            let opened = std::time::Instant::now();
-            let engine = sources::geocode_engine(&dir, sources::normalizer(country)?, false)?;
-            let open_ms = opened.elapsed().as_secs_f64() * 1000.0;
-            let parser = sources::parser(country)?;
-            let mut ctx = geko_core::query::QueryContext { size, ..Default::default() };
-            if let Some(f) = focus {
-                let (lat, lon) = f.split_once(',').context("--focus must be lat,lon")?;
-                ctx.focus = Some(geko_core::geo::Coord::from_degrees(lat.trim().parse()?, lon.trim().parse()?)?);
+        Command::Build { force, purge: first_purge, refresh } => {
+            prepare(&modules)?;
+            if first_purge {
+                purge(&modules, geko_module_sdk::module::Purge::Data)?;
             }
-            let mut hits = Vec::new();
-            let started = std::time::Instant::now();
-            let parsed = parser.parse(&text)?;
-            if autocomplete {
-                engine.autocomplete(&parsed, &ctx, &mut hits)?;
-            } else {
-                engine.search(&parsed, &ctx, &mut hits)?;
-            }
-            let cold_us = started.elapsed().as_micros();
-            let runs = 200;
-            let warm = std::time::Instant::now();
-            for _ in 0..runs {
-                let parsed = parser.parse(&text)?;
-                if autocomplete { engine.autocomplete(&parsed, &ctx, &mut hits)? } else { engine.search(&parsed, &ctx, &mut hits)? }
-            }
-            let warm_us = warm.elapsed().as_micros() / runs;
-            if debug {
-                // Once more, warm, timing each interpretation.
-                let debug_ctx = geko_core::query::QueryContext { debug: true, ..ctx.clone() };
-                let parsed = parser.parse(&text)?;
-                if autocomplete { engine.autocomplete(&parsed, &debug_ctx, &mut hits)? } else { engine.search(&parsed, &debug_ctx, &mut hits)? }
-            }
-            for h in &hits {
-                let Some(place) = engine.place(h.id) else { continue };
-                let props: serde_json::Value =
-                    serde_json::from_slice(&[b"{".as_slice(), &place.json, b"}"].concat()).unwrap_or_default();
-                println!(
-                    "{:>7.3}  {:<13} {:<12} {}  [{}]",
-                    h.score,
-                    place.kind.as_str(),
-                    h.match_type.as_str(),
-                    props["label"].as_str().unwrap_or(&place.name),
-                    place.public_id
-                );
-            }
-            println!("open {open_ms:.1} ms · first query {cold_us} µs · warm {warm_us} µs/query");
+            print!("{}", run::build(&config, &modules, force, refresh)?);
         }
-        Command::Reverse { lat, lon, country, size } => {
-            let segment = plan::segment_dir(&config, country);
-            let opened = std::time::Instant::now();
-            let reverse = sources::reverse_index(&segment.join("reverse"))?;
-            let engine = sources::geocode_engine(&segment.join("geocode"), sources::normalizer(country)?, false)?;
-            let open_ms = opened.elapsed().as_millis();
-            let point = geko_core::geo::Coord::from_degrees(lat, lon)?;
-            let mut hits = Vec::new();
-            let started = std::time::Instant::now();
-            reverse.nearest(point, geko_core::query::KindFilter::ALL, size, &mut hits)?;
-            let chain = reverse.admin_at(point);
-            let query_us = started.elapsed().as_micros();
-            for h in &hits {
-                let Some(place) = engine.place(h.id) else { continue };
-                let props: serde_json::Value = serde_json::from_slice(&[b"{".as_slice(), &place.json, b"}"].concat()).unwrap_or_default();
-                let metres = geko_geom::distance_m((point.lon_e7(), point.lat_e7()), (place.point.lon_e7(), place.point.lat_e7()));
-                println!("{metres:>7.1} m  {:<13} {}  [{}]", place.kind.as_str(), props["label"].as_str().unwrap_or(&place.name), place.public_id);
-            }
-            if let Some(chain) = chain {
-                let levels: Vec<String> = chain.levels.iter().map(|l| format!("{} {} ({})", l.kind, l.name, l.code)).collect();
-                println!("admin: {}", levels.join(" > "));
-            }
-            println!("open {open_ms} ms · query {query_us} µs");
-        }
-        Command::Serve { listen } => serve(&config, &active, listen)?,
-        Command::Up { force, purge, refresh, listen } => {
-            ensure_packs()?;
-            let prepared = plan::prepare(&config, &active, &sources::registry())?;
-            if purge {
-                print!("{}", plan::purge(&config, &prepared)?);
+        Command::Serve { listen } => serve(&config, &modules, listen)?,
+        Command::Up { force, purge: first_purge, refresh, listen } => {
+            prepare(&modules)?;
+            if first_purge {
+                purge(&modules, geko_module_sdk::module::Purge::Data)?;
             }
             // Fails now rather than serve nothing while every build in the background fails.
-            plan::licenses_accepted(&config, &prepared)?;
-            let (builder, background) = (config.clone(), active.clone());
-            std::thread::Builder::new()
-                .name("geko-build".into())
-                .spawn(move || plan::regenerate(&builder, &background, &prepared, force, refresh))?;
-            serve(&config, &active, listen)?;
+            for m in &modules {
+                m.ready()?;
+            }
+            let (builder, background) = (config.clone(), modules.clone());
+            std::thread::Builder::new().name("geko-build".into()).spawn(move || run::regenerate(&builder, &background, force, refresh))?;
+            serve(&config, &modules, listen)?;
         }
         Command::Purge { what } => {
             if matches!(what, None | Some(Purge::Data)) {
-                ensure_packs()?;
-                let prepared = plan::prepare(&config, &active, &sources::registry())?;
-                print!("{}", plan::purge(&config, &prepared)?);
+                prepare(&modules)?;
+                purge(&modules, geko_module_sdk::module::Purge::Data)?;
             }
-            if let None | Some(Purge::CountryPacks { .. }) = what {
-                let all = matches!(what, Some(Purge::CountryPacks { all: true }));
-                let scope: Vec<_> = config.scope()?.countries().collect();
-                for dir in geko_country_pack::registry::purge(&packs_dir, (!all).then_some(scope.as_slice()))? {
-                    println!("purged {}", dir.display());
-                }
+            if let None | Some(Purge::Packages { .. }) = what {
+                let all = matches!(what, Some(Purge::Packages { all: true }));
+                purge(&modules, geko_module_sdk::module::Purge::Packages { all })?;
             }
         }
+        Command::Module(args) => module_command(&modules, &args)?,
     }
     Ok(())
 }

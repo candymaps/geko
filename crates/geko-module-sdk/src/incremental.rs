@@ -15,7 +15,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use geko_core::{GekoError, Result};
+use crate::{GekoError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

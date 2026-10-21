@@ -1,101 +1,138 @@
-use std::collections::BTreeSet;
+//! The modules of this binary and how the host opens them (docs/MODULES_PLAN.md). For now they
+//! are linked in (`StaticModule`), each behind its Cargo feature.
+
+use std::path::Path;
 use std::sync::Arc;
 
-use geko_core::{GekoError, Result};
-use geko_server::{Module, ModuleName};
+use geko_module_sdk::module::{Context, Module, ModuleName, Open};
+use geko_module_sdk::{GekoError, Result};
 
-use crate::config::ModulesConfig;
+use crate::config::Config;
 
-pub fn compiled(name: ModuleName) -> bool {
-    match name {
-        ModuleName::Geocoder => cfg!(feature = "geocoder"),
-        ModuleName::Tiles => cfg!(feature = "tiles"),
-    }
-}
-
-/// The CLI list, when given, replaces the `[modules]` section entirely.
-pub fn resolve(config: &ModulesConfig, cli: Option<&[ModuleName]>, compiled: impl Fn(ModuleName) -> bool) -> Result<Vec<ModuleName>> {
-    let requested: BTreeSet<ModuleName> = match cli {
-        Some(list) => list.iter().copied().collect(),
-        None => ModuleName::ALL
-            .into_iter()
-            .filter(|m| match m {
-                ModuleName::Geocoder => config.geocoder,
-                ModuleName::Tiles => config.tiles,
-            })
-            .collect(),
-    };
-    if requested.is_empty() {
-        return Err(GekoError::Config("at least one module must be active (geocoder, tiles)".into()));
-    }
-    if let Some(missing) = requested.iter().find(|m| !compiled(**m)) {
-        return Err(GekoError::Config(format!(
-            "module `{missing}` is active but this binary was built without the `{missing}` feature"
-        )));
-    }
-    Ok(requested.into_iter().collect())
-}
-
-pub fn instantiate(name: ModuleName, config: &crate::config::Config) -> Result<Arc<dyn Module>> {
-    let _ = config;
-    match name {
+/// The modules linked into this binary, by name.
+pub fn linked() -> Vec<(&'static str, Open)> {
+    vec![
         #[cfg(feature = "geocoder")]
-        ModuleName::Geocoder => Ok(Arc::new(geko_module_geocoder::GeocoderModule::new(
-            crate::sources::segment_opener(config.serve.preload),
-            geko_module_geocoder::GeocoderConfig {
-                countries: config.served_countries()?,
-                search_budget: budget(config.serve.search_budget_ms),
-                autocomplete_budget: budget(config.serve.autocomplete_budget_ms),
-                slow_query: budget(config.serve.slow_query_ms),
-                same_entity_m: config.serve.same_entity_m,
-                batch_max: config.serve.batch_max,
-                cache_entries: config.serve.cache_entries,
-                ..Default::default()
-            },
-        ))),
+        (geko_module_geocoder::NAME, geko_module_geocoder::open as Open),
         #[cfg(feature = "tiles")]
-        ModuleName::Tiles => Ok(Arc::new(geko_module_tiles::TilesModule::new())),
-        #[allow(unreachable_patterns)]
-        other => Err(GekoError::Config(format!("module `{other}` is not compiled into this binary"))),
-    }
+        (geko_module_tiles::NAME, geko_module_tiles::open as Open),
+    ]
 }
 
-/// A budget in milliseconds from `geko.toml`, 0 meaning none.
-#[allow(dead_code)]
-fn budget(ms: u64) -> Option<std::time::Duration> {
-    (ms > 0).then(|| std::time::Duration::from_millis(ms))
+/// The active modules: those of `[modules]`, or of `--modules`, which replaces it entirely.
+pub fn resolve(config: &Config, cli: Option<&[ModuleName]>, linked: &[(&'static str, Open)]) -> Result<Vec<ModuleName>> {
+    let mut active = match cli {
+        Some(list) => list.to_vec(),
+        None => config.active_modules(),
+    };
+    active.sort();
+    active.dedup();
+    if active.is_empty() {
+        let names: Vec<&str> = linked.iter().map(|(n, _)| *n).collect();
+        return Err(GekoError::Config(format!("at least one module must be active ({})", names.join(", "))));
+    }
+    if let Some(missing) = active.iter().find(|m| !linked.iter().any(|(n, _)| *n == m.as_str())) {
+        return Err(GekoError::Config(format!("module `{missing}` is active but this binary was built without the `{missing}` feature")));
+    }
+    Ok(active)
+}
+
+/// Opens every active module with its file of configuration (missing: its defaults).
+pub fn open(config: &Config, geko_toml: &Path, active: &[ModuleName], linked: &[(&'static str, Open)]) -> Result<Vec<Arc<dyn Module>>> {
+    let scope = config.scope()?;
+    active
+        .iter()
+        .map(|name| {
+            let (_, open) = linked.iter().find(|(n, _)| *n == name.as_str()).expect("resolved");
+            let file = config.module_config(name, geko_toml);
+            let text = match std::fs::read_to_string(&file) {
+                Ok(text) => text,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(e) => return Err(GekoError::Config(format!("cannot read {}: {e}", file.display()))),
+            };
+            let context = Context {
+                config: text,
+                config_file: file.display().to_string(),
+                scope: scope.clone(),
+                data_dir: config.data.dir.clone(),
+                data: config.data.policy(),
+            };
+            let module: Arc<dyn Module> = Arc::from(open(context)?);
+            let described = module.describe();
+            if described.name != *name {
+                return Err(GekoError::Incompatible(format!("module `{name}` calls itself `{}`", described.name)));
+            }
+            if described.contract != geko_module_sdk::module::CONTRACT {
+                return Err(GekoError::Incompatible(format!(
+                    "module `{name}` {} implements contract {}, and this geko speaks contract {}",
+                    described.version,
+                    described.contract,
+                    geko_module_sdk::module::CONTRACT
+                )));
+            }
+            Ok(module)
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geko_module_sdk::module::Description;
 
-    fn all(_: ModuleName) -> bool {
-        true
+    fn fake(_: Context) -> Result<Box<dyn Module>> {
+        unimplemented!()
+    }
+
+    fn both() -> Vec<(&'static str, Open)> {
+        vec![("geocoder", fake as Open), ("tiles", fake as Open)]
+    }
+
+    fn name(n: &str) -> ModuleName {
+        ModuleName::new(n).unwrap()
     }
 
     #[test]
-    fn config_selects_modules() {
-        let cfg = ModulesConfig { geocoder: true, tiles: false };
-        assert_eq!(resolve(&cfg, None, all).unwrap(), vec![ModuleName::Geocoder]);
+    fn config_selects_modules_and_the_cli_replaces_it() {
+        let cfg = Config::parse("[modules]\ntiles = false\n").unwrap();
+        assert_eq!(resolve(&cfg, None, &both()).unwrap(), [name("geocoder")]);
+        assert_eq!(resolve(&cfg, Some(&[name("tiles")]), &both()).unwrap(), [name("tiles")]);
     }
 
     #[test]
-    fn cli_overrides_config() {
-        let cfg = ModulesConfig { geocoder: true, tiles: false };
-        assert_eq!(resolve(&cfg, Some(&[ModuleName::Tiles]), all).unwrap(), vec![ModuleName::Tiles]);
-    }
-
-    #[test]
-    fn fails_when_no_module_is_active() {
-        let cfg = ModulesConfig { geocoder: false, tiles: false };
-        assert!(resolve(&cfg, None, all).is_err());
-        assert!(resolve(&ModulesConfig::default(), Some(&[]), all).is_err());
-    }
-
-    #[test]
-    fn fails_when_active_module_is_not_compiled() {
-        let err = resolve(&ModulesConfig::default(), None, |m| m == ModuleName::Geocoder).unwrap_err();
+    fn fails_when_no_module_is_active_or_one_is_not_linked() {
+        let cfg = Config::parse("[modules]\ngeocoder = false\ntiles = false\n").unwrap();
+        assert!(resolve(&cfg, None, &both()).is_err());
+        assert!(resolve(&Config::default(), Some(&[]), &both()).is_err());
+        let err = resolve(&Config::default(), None, &both()[..1]).unwrap_err();
         assert!(err.to_string().contains("`tiles` feature"), "{err}");
+    }
+
+    struct Named(&'static str, u32);
+
+    impl Module for Named {
+        fn describe(&self) -> Description {
+            Description {
+                name: name(self.0),
+                version: "1".into(),
+                contract: self.1,
+                routes: vec![],
+                home: None,
+                openapi: None,
+                attribution: None,
+                commands: vec![],
+            }
+        }
+    }
+
+    #[test]
+    fn a_module_of_another_contract_is_refused() {
+        let other: Open = |_| Ok(Box::new(Named("geocoder", geko_module_sdk::module::CONTRACT + 1)));
+        let ok: Open = |_| Ok(Box::new(Named("geocoder", geko_module_sdk::module::CONTRACT)));
+        let geocoder = [name("geocoder")];
+        let toml = Path::new("/nonexistent/geko.toml");
+        let err = open(&Config::default(), toml, &geocoder, &[("geocoder", other)]).err().unwrap();
+        assert!(err.to_string().contains("contract"), "{err}");
+        assert_eq!(open(&Config::default(), toml, &geocoder, &[("geocoder", ok)]).unwrap().len(), 1);
     }
 }

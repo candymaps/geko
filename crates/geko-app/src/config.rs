@@ -1,48 +1,61 @@
+//! `geko.toml`: what geko (the host) reads. Every module has its own file beside it
+//! (`geko-<module>.toml`, docs/MODULES_PLAN.md); this one keeps the active modules, the scope,
+//! the data directory and how data are downloaded, the bundles and the HTTP side of the server.
+
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
-use geko_core::country::{CountryCode, RegionCode};
-use geko_core::scope::Scope;
-use geko_core::{GekoError, Result};
+use geko_module_sdk::country::{CountryCode, RegionCode};
+use geko_module_sdk::module::{DataPolicy, ModuleName, Refresh};
+use geko_module_sdk::scope::Scope;
+use geko_module_sdk::{GekoError, Result};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    pub modules: ModulesConfig,
+    pub modules: BTreeMap<String, ModuleEntry>,
     pub scope: Vec<ScopeEntry>,
     pub data: DataConfig,
-    /// Each provider parses its own section; only `enabled` is common.
-    pub sources: BTreeMap<String, toml::Table>,
     pub build: BuildConfig,
     pub serve: ServeConfig,
-    pub packs: PacksConfig,
+}
+
+/// `geocoder = true`, or a table with the options of the module.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum ModuleEntry {
+    Enabled(bool),
+    Table(ModuleTable),
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct PacksConfig {
-    /// Where the country packs are published: `<registry>/<country>:format-<n>` (PROJECT.md §2.4).
-    pub registry: String,
+#[serde(deny_unknown_fields)]
+pub struct ModuleTable {
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    /// Its file of configuration, relative to `geko.toml`; `geko-<module>.toml` beside it by default.
+    pub config: Option<PathBuf>,
 }
 
-impl Default for PacksConfig {
-    fn default() -> Self {
-        Self { registry: geko_country_pack::registry::DEFAULT_REGISTRY.to_owned() }
+fn yes() -> bool {
+    true
+}
+
+impl ModuleEntry {
+    pub fn enabled(&self) -> bool {
+        match self {
+            ModuleEntry::Enabled(on) => *on,
+            ModuleEntry::Table(t) => t.enabled,
+        }
     }
-}
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct ModulesConfig {
-    pub geocoder: bool,
-    pub tiles: bool,
-}
-
-impl Default for ModulesConfig {
-    fn default() -> Self {
-        Self { geocoder: true, tiles: true }
+    fn config(&self) -> Option<&Path> {
+        match self {
+            ModuleEntry::Enabled(_) => None,
+            ModuleEntry::Table(t) => t.config.as_deref(),
+        }
     }
 }
 
@@ -52,24 +65,6 @@ pub struct ScopeEntry {
     pub country: String,
     #[serde(default)]
     pub regions: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum Refresh {
-    Never,
-    IfChanged,
-    Always,
-}
-
-impl Refresh {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Refresh::Never => "never",
-            Refresh::IfChanged => "if-changed",
-            Refresh::Always => "always",
-        }
-    }
 }
 
 /// The configuration file, unless `GEKO_CONFIG` names another one.
@@ -102,14 +97,28 @@ pub struct DataConfig {
 
 impl Default for DataConfig {
     fn default() -> Self {
+        let policy = DataPolicy::default();
         Self {
             dir: std::env::var_os("GEKO_DATA").map_or_else(|| PathBuf::from(DATA_DIR), PathBuf::from),
-            refresh: Refresh::IfChanged,
-            max_age_days: 30,
-            offline: false,
-            keep_downloads: false,
-            accept_licenses: false,
-            parallel_downloads: 4,
+            refresh: policy.refresh,
+            max_age_days: policy.max_age_days,
+            offline: policy.offline,
+            keep_downloads: policy.keep_downloads,
+            accept_licenses: policy.accept_licenses,
+            parallel_downloads: policy.parallel_downloads,
+        }
+    }
+}
+
+impl DataConfig {
+    pub fn policy(&self) -> DataPolicy {
+        DataPolicy {
+            refresh: self.refresh,
+            max_age_days: self.max_age_days,
+            offline: self.offline,
+            keep_downloads: self.keep_downloads,
+            accept_licenses: self.accept_licenses,
+            parallel_downloads: self.parallel_downloads,
         }
     }
 }
@@ -133,24 +142,12 @@ impl Default for BuildConfig {
 #[serde(default)]
 pub struct ServeConfig {
     pub listen: SocketAddr,
-    /// Countries this node serves; empty means every country of the bundle.
-    pub countries: Vec<String>,
-    /// Load hot index files into RAM at startup (PROJECT.md §9.6).
-    pub preload: bool,
     /// Seconds between checks for a new bundle version.
     pub reload_secs: u64,
-    /// Time budget of a search and of an autocomplete request, in milliseconds (0: none). Past
-    /// it the engine returns what it found; its likeliest reading always completes.
-    pub search_budget_ms: u64,
-    pub autocomplete_budget_ms: u64,
-    /// Requests slower than this, in milliseconds, are logged with their query (0: none).
-    pub slow_query_ms: u64,
-    /// Results with the same name closer than this, in metres, are merged in the answer
-    /// (PROJECT.md §6.5.6); 0 merges only the same id.
-    pub same_entity_m: f64,
     /// Origins allowed to call the API from a browser (`*`: any); empty sends no CORS headers.
     pub cors_origins: Vec<String>,
-    /// API keys accepted; empty leaves the API open. `/`, `/health` and `/v1/attribution` never need one.
+    /// API keys accepted; empty leaves the API open. `/`, `/health`, `/v1/attribution` and the
+    /// pages of the modules never need one.
     pub api_keys: Vec<String>,
     /// Requests per second allowed from one client address, and the burst above it (0: none).
     pub rate_limit_per_s: f64,
@@ -158,11 +155,6 @@ pub struct ServeConfig {
     /// Where to ask for the code that reproduces the served derivative database (ODbL 4.6), shown in
     /// `/v1/attribution`: an e-mail address or a URL.
     pub attribution_contact: String,
-    /// Most requests in one `/v1/batch`.
-    pub batch_max: usize,
-    /// Search and autocomplete answers kept for repeated queries (0: none), cleared when the
-    /// bundle changes.
-    pub cache_entries: usize,
     /// HTTP address of a bundles directory published on another machine (its `current.version`
     /// and versions); each reload pulls a newer version into `bundles`, downloading only the
     /// artifacts that changed. Empty: serve the local directory as it is.
@@ -173,36 +165,59 @@ impl Default for ServeConfig {
     fn default() -> Self {
         Self {
             listen: SocketAddr::from(([127, 0, 0, 1], 8080)),
-            countries: Vec::new(),
-            preload: true,
             reload_secs: 30,
-            search_budget_ms: 15,
-            autocomplete_budget_ms: 5,
-            slow_query_ms: 50,
-            same_entity_m: 100.0,
             cors_origins: Vec::new(),
             api_keys: Vec::new(),
             rate_limit_per_s: 0.0,
             rate_limit_burst: 0.0,
             attribution_contact: String::new(),
-            batch_max: 100,
-            cache_entries: 0,
             bundles_url: String::new(),
         }
     }
 }
 
+/// Options that `geko.toml` had and are now the geocoder's, in `geko-geocoder.toml`: a `geko.toml`
+/// that still has one fails, rather than lose it without a word. `None`: the whole section.
+const MOVED_TO_GEOCODER: &[(&str, Option<&str>)] = &[
+    ("sources", None),
+    ("packs", None),
+    ("serve", Some("countries")),
+    ("serve", Some("preload")),
+    ("serve", Some("search_budget_ms")),
+    ("serve", Some("autocomplete_budget_ms")),
+    ("serve", Some("slow_query_ms")),
+    ("serve", Some("same_entity_m")),
+    ("serve", Some("batch_max")),
+    ("serve", Some("cache_entries")),
+];
+
+/// The modules active by default, without a `[modules]` entry.
+const DEFAULT_MODULES: &[&str] = &["geocoder", "tiles"];
+
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| GekoError::Config(format!("cannot read {}: {e}", path.display())))?;
-        Self::parse(&text)
+        let text = std::fs::read_to_string(path).map_err(|e| GekoError::Config(format!("cannot read {}: {e}", path.display())))?;
+        Self::parse(&text).map_err(|e| GekoError::Config(format!("{}: {e}", path.display())))
     }
 
     pub fn parse(text: &str) -> Result<Self> {
-        let config: Config = toml::from_str(text).map_err(|e| GekoError::Config(e.to_string()))?;
+        let table: toml::Table = toml::from_str(text).map_err(|e| GekoError::Config(e.to_string()))?;
+        for (section, key) in MOVED_TO_GEOCODER {
+            let Some(found) = table.get(*section) else { continue };
+            let moved = match key {
+                None => Some(format!("[{section}]")),
+                Some(key) => found.get(*key).map(|_| format!("[{section}] {key}")),
+            };
+            if let Some(what) = moved {
+                return Err(GekoError::Config(format!("{what} is an option of the geocoder now: move it to geko-geocoder.toml, beside geko.toml")));
+            }
+        }
+        let config: Config = toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| GekoError::Config(e.to_string()))?;
         if config.data.parallel_downloads == 0 {
             return Err(GekoError::Config("data.parallel_downloads must be at least 1".into()));
+        }
+        for name in config.modules.keys() {
+            ModuleName::new(name)?;
         }
         Ok(config)
     }
@@ -221,22 +236,29 @@ impl Config {
         Ok(scope)
     }
 
+    /// The modules `[modules]` makes active, in order of name: those set to true, and those it
+    /// does not mention of `DEFAULT_MODULES`.
+    pub fn active_modules(&self) -> Vec<ModuleName> {
+        let mut names: Vec<&str> = self.modules.iter().filter(|(_, e)| e.enabled()).map(|(n, _)| n.as_str()).collect();
+        names.extend(DEFAULT_MODULES.iter().filter(|m| !self.modules.contains_key(**m)));
+        names.sort();
+        names.dedup();
+        names.into_iter().map(|n| ModuleName::new(n).expect("checked when parsed")).collect()
+    }
+
+    /// The file of configuration of `module`: `[modules.<module>] config`, relative to `geko.toml`,
+    /// or `geko-<module>.toml` beside it.
+    pub fn module_config(&self, module: &ModuleName, geko_toml: &Path) -> PathBuf {
+        let dir = geko_toml.parent().unwrap_or(Path::new("."));
+        match self.modules.get(module.as_str()).and_then(|e| e.config()) {
+            Some(path) => dir.join(path),
+            None => dir.join(format!("geko-{module}.toml")),
+        }
+    }
+
     /// Where bundles are published and served from.
     pub fn bundles_dir(&self) -> PathBuf {
         self.data.dir.join("bundles")
-    }
-
-    #[cfg(feature = "geocoder")]
-    pub fn served_countries(&self) -> Result<Vec<CountryCode>> {
-        self.serve.countries.iter().map(|c| CountryCode::new(c).map_err(|e| GekoError::Config(e.to_string()))).collect()
-    }
-
-    pub fn source_enabled(&self, name: &str) -> Result<bool> {
-        match self.sources.get(name).and_then(|t| t.get("enabled")) {
-            None => Ok(true),
-            Some(toml::Value::Boolean(b)) => Ok(*b),
-            Some(other) => Err(GekoError::Config(format!("sources.{name}.enabled must be a boolean, got {other}"))),
-        }
     }
 }
 
@@ -244,10 +266,14 @@ impl Config {
 mod tests {
     use super::*;
 
+    fn names(c: &Config) -> Vec<String> {
+        c.active_modules().into_iter().map(|m| m.to_string()).collect()
+    }
+
     #[test]
     fn defaults_enable_both_modules() {
         let c = Config::parse("").unwrap();
-        assert!(c.modules.geocoder && c.modules.tiles);
+        assert_eq!(names(&c), ["geocoder", "tiles"]);
         assert_eq!(c.serve.listen.port(), 8080);
         assert!(!c.data.accept_licenses);
         assert_eq!(c.data.refresh, Refresh::IfChanged);
@@ -258,22 +284,38 @@ mod tests {
     }
 
     #[test]
+    fn modules_as_booleans_or_tables() {
+        let c = Config::parse("[modules]\ntiles = false\n").unwrap();
+        assert_eq!(names(&c), ["geocoder"]);
+        let c = Config::parse("[modules.geocoder]\nconfig = \"exact.toml\"\n\n[modules.tiles]\nenabled = false\n").unwrap();
+        assert_eq!(names(&c), ["geocoder"]);
+        let geocoder = ModuleName::new("geocoder").unwrap();
+        assert_eq!(c.module_config(&geocoder, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/exact.toml"));
+        let tiles = ModuleName::new("tiles").unwrap();
+        assert_eq!(c.module_config(&tiles, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/geko-tiles.toml"));
+        assert!(Config::parse("[modules.geocoder]\nconfg = \"x\"\n").is_err());
+        assert!(Config::parse("[modules]\nGeocoder = true\n").is_err());
+    }
+
+    #[test]
+    fn options_of_the_geocoder_name_their_new_file() {
+        for text in ["[sources.osm]\nmirror = \"auto\"\n", "[packs]\nregistry = \"x\"\n", "[serve]\npreload = false\n", "[serve]\ncache_entries = 5\n"] {
+            let err = Config::parse(text).unwrap_err().to_string();
+            assert!(err.contains("geko-geocoder.toml"), "{text}: {err}");
+        }
+        assert!(Config::parse("[serve]\nlisten = \"0.0.0.0:9000\"\n").is_ok());
+    }
+
+    #[test]
     fn ignores_sections_of_other_components() {
-        let c = Config::parse(
-            "[modules]\ntiles = false\n\n[build]\ngeocode = \"fst\"\n\n[serve]\nlisten = \"0.0.0.0:9000\"\npreload = true\n",
-        )
-        .unwrap();
-        assert!(c.modules.geocoder);
-        assert!(!c.modules.tiles);
+        let c = Config::parse("[modules]\ntiles = false\n\n[build]\ngeocode = \"fst\"\n\n[serve]\nlisten = \"0.0.0.0:9000\"\n").unwrap();
+        assert_eq!(names(&c), ["geocoder"]);
         assert_eq!(c.serve.listen.port(), 9000);
     }
 
     #[test]
     fn parses_scope_with_several_countries() {
-        let c = Config::parse(
-            "[[scope]]\ncountry = \"es\"\nregions = [\"ES-B\", \"es-m\"]\n\n[[scope]]\ncountry = \"PT\"\n",
-        )
-        .unwrap();
+        let c = Config::parse("[[scope]]\ncountry = \"es\"\nregions = [\"ES-B\", \"es-m\"]\n\n[[scope]]\ncountry = \"PT\"\n").unwrap();
         let scope = c.scope().unwrap();
         let countries: Vec<_> = scope.countries().map(|c| c.to_string()).collect();
         assert_eq!(countries, ["ES", "PT"]);
@@ -291,23 +333,11 @@ mod tests {
 
     #[test]
     fn parses_data_section() {
-        let c = Config::parse(
-            "[data]\nrefresh = \"always\"\noffline = true\naccept_licenses = true\nparallel_downloads = 2\n",
-        )
-        .unwrap();
+        let c = Config::parse("[data]\nrefresh = \"always\"\noffline = true\naccept_licenses = true\nparallel_downloads = 2\n").unwrap();
         assert_eq!(c.data.refresh, Refresh::Always);
         assert!(c.data.offline && c.data.accept_licenses);
         assert!(Config::parse("[data]\nparallel_downloads = 0\n").is_err());
         assert!(Config::parse("[data]\nrefresh = \"sometimes\"\n").is_err());
         assert!(Config::parse("[data]\ndir = \"/srv/geko\"\n").is_err());
-    }
-
-    #[test]
-    fn source_sections() {
-        let c = Config::parse("[sources.osm]\nmirror = \"auto\"\n\n[sources.cartociudad]\nenabled = false\n").unwrap();
-        assert!(c.source_enabled("osm").unwrap());
-        assert!(!c.source_enabled("cartociudad").unwrap());
-        let bad = Config::parse("[sources.osm]\nenabled = \"yes\"\n").unwrap();
-        assert!(bad.source_enabled("osm").is_err());
     }
 }

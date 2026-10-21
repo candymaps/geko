@@ -1,38 +1,51 @@
+//! What geko serves for every module (docs/MODULES_PLAN.md): `/health`, `/metrics`,
+//! `/v1/attribution`, `/openapi.yaml` and `/docs`, API keys, CORS and the rate limit, the bundle
+//! that every module loads and keeps watching, and the routes of each active module, mounted under
+//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio.
+
 mod access;
 mod metrics;
 
+use std::collections::HashSet;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::body::Bytes;
+use axum::extract::{Query, RawPathParams};
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::response::{IntoResponse, Redirect, Response};
+use axum::routing::{MethodRouter, get, post};
 use axum::{Json, Router};
-use geko_core::Result;
-use geko_core::bundle::{BundleManifest, LicenseNotice, current_version};
-pub use access::Access;
-pub use geko_core::module::ModuleName;
+use geko_module_sdk::Result;
+use geko_module_sdk::bundle::{BundleManifest, LicenseNotice, current_version};
+use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Request};
 use serde_json::json;
 
-#[derive(Debug, Clone)]
-pub struct BundleView {
-    pub root: PathBuf,
-    pub manifest: BundleManifest,
+pub use access::Access;
+
+/// An active module and what it said it is.
+#[derive(Clone)]
+pub struct Mounted {
+    pub module: Arc<dyn Module>,
+    pub description: Description,
 }
 
-/// A functional module (PROJECT.md §2.3). Only active modules are instantiated,
-/// so an inactive module allocates nothing and registers no routes.
-pub trait Module: Send + Sync {
-    fn name(&self) -> ModuleName;
-    /// Loads a bundle and switches to it atomically; queries in flight finish on the previous one.
-    fn load(&self, bundle: &BundleView) -> Result<()>;
-    fn router(&self) -> Router;
-    fn shutdown(&self) -> Result<()>;
-    /// Appends the module's own counters to `/metrics`, in the Prometheus text format.
-    fn metrics(&self, _out: &mut String) {}
+impl Mounted {
+    pub fn new(module: Arc<dyn Module>) -> Self {
+        Self { description: module.describe(), module }
+    }
+
+    fn name(&self) -> &str {
+        self.description.name.as_str()
+    }
+
+    /// The path where its route `path` is served.
+    fn path(&self, path: &str) -> String {
+        format!("/{}/{path}", self.name())
+    }
 }
 
 /// Brings a newer version into the bundles directory before each look for one: bundles built
@@ -50,12 +63,12 @@ pub struct BundleSource {
 /// Loads the `current` bundle into every module and keeps watching for new versions.
 pub struct BundleManager {
     source: BundleSource,
-    modules: Vec<Arc<dyn Module>>,
+    modules: Vec<Mounted>,
     loaded: ArcSwapOption<(String, Vec<LicenseNotice>)>,
 }
 
 impl BundleManager {
-    pub fn new(source: BundleSource, modules: Vec<Arc<dyn Module>>) -> Self {
+    pub fn new(source: BundleSource, modules: Vec<Mounted>) -> Self {
         Self { source, modules, loaded: ArcSwapOption::empty() }
     }
 
@@ -68,8 +81,8 @@ impl BundleManager {
         self.loaded.load_full().map(|v| v.1.clone()).unwrap_or_default()
     }
 
-    /// Loads `current` if it differs from the loaded version. On error the previous bundle
-    /// stays in service.
+    /// Loads `current` if it differs from the loaded version, into every module that has a part
+    /// of it. On error the previous bundle stays in service.
     pub fn refresh(&self) -> Result<bool> {
         if let Some(pull) = &self.source.pull
             && let Err(e) = pull()
@@ -81,13 +94,28 @@ impl BundleManager {
             return Ok(false);
         }
         let root = self.source.dir.join(&version);
-        let view = BundleView { manifest: BundleManifest::read(&root)?, root };
-        let started = std::time::Instant::now();
+        let manifest = BundleManifest::read(&root)?;
+        let started = Instant::now();
         for m in &self.modules {
-            m.load(&view)?;
+            let Some(part) = manifest.module(&m.description.name) else {
+                tracing::warn!(module = m.name(), %version, "the bundle has no part of this module: it serves nothing");
+                continue;
+            };
+            if part.contract != m.description.contract {
+                return Err(geko_module_sdk::GekoError::Incompatible(format!(
+                    "bundle {version}: its {} part was built by a module of contract {}, and the module here is of contract {}",
+                    m.name(),
+                    part.contract,
+                    m.description.contract
+                )));
+            }
+            if part.version != m.description.version {
+                tracing::warn!(module = m.name(), built_by = part.version, serving = m.description.version, "the bundle was built by another version of the module");
+            }
+            m.module.load(&BundleView { root: root.clone(), manifest: manifest.clone(), module: part.clone() })?;
         }
         tracing::info!(%version, elapsed = ?started.elapsed(), "bundle loaded");
-        self.loaded.store(Some(Arc::new((version, view.manifest.licenses))));
+        self.loaded.store(Some(Arc::new((version, manifest.licenses))));
         Ok(true)
     }
 
@@ -108,44 +136,134 @@ impl BundleManager {
     }
 }
 
-/// The method of making the fused database, offered under ODbL 4.6 to whoever gets results.
-const FUSION_METHOD: &str = include_str!("../../../docs/FUSION_METHOD.md");
-
-/// The reference of the API, served at `/openapi.yaml` and browsed at `/docs` (Swagger UI).
+/// The reference of what every module shares, served at `/openapi.yaml`; `/docs` lists it with
+/// those of the modules.
 const OPENAPI: &str = include_str!("../../../openapi.yaml");
 const DOCS: &str = include_str!("docs.html");
 
-/// Licenses and attributions of the served data (PROJECT.md §6.4): the sources of the bundle,
-/// and, since fusing them with OpenStreetMap makes a derivative database, where its method is
-/// described and whom to ask for the code that reproduces it.
-fn attribution(bundles: Option<&BundleManager>, contact: Option<&str>) -> serde_json::Value {
+/// Licenses and attributions of the served data (PROJECT.md §6.4): the sources of the bundle, whom
+/// to ask for the code that reproduces it, and what each module adds under its name.
+fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Option<&str>) -> serde_json::Value {
     let licenses = bundles.map(|b| b.licenses()).unwrap_or_default();
-    json!({
+    let mut body = json!({
         "bundle": bundles.and_then(|b| b.version()),
+        "contact": contact,
         "sources": licenses.iter().map(|l| json!({ "source": l.source, "license": l.name, "attribution": l.attribution, "url": l.url })).collect::<Vec<_>>(),
-        "derivative_database": {
-            "license": "ODbL 1.0",
-            "notice": "The data served are a derivative database of OpenStreetMap, fused with the other sources listed. As ODbL 4.6 allows, the method of making it is described at /v1/attribution/method, and the code needed to reproduce it is available on request.",
-            "method": "/v1/attribution/method",
-            "contact": contact,
-        },
-    })
+    });
+    for m in modules {
+        if let Some(a) = &m.description.attribution {
+            body[m.name()] = a.clone();
+        }
+    }
+    body
 }
 
-pub fn router(modules: &[Arc<dyn Module>], bundles: Option<Arc<BundleManager>>, access: Access, contact: Option<String>) -> Router {
-    let names: Vec<&'static str> = modules.iter().map(|m| m.name().as_str()).collect();
-    let attribution_bundles = bundles.clone();
-    let attribution_routes = Router::new()
+/// `/docs`: Swagger UI over the reference of geko and those of the modules.
+fn docs(modules: &[Mounted]) -> String {
+    let mut specs = vec![json!({ "url": "/openapi.yaml", "name": "geko" })];
+    specs.extend(modules.iter().filter_map(|m| m.description.openapi.as_ref().map(|p| json!({ "url": m.path(p), "name": m.name() }))));
+    let home = modules.iter().any(|m| m.description.home.is_some());
+    DOCS.replace("__SPECS__", &serde_json::Value::from(specs).to_string()).replace("__HOME__", if home { "true" } else { "false" })
+}
+
+/// Runs the CPU-bound work of a request (parsing, search) on the blocking pool, so the async
+/// workers keep accepting connections and answering cheap routes meanwhile; at most one such job
+/// per core runs at once, the rest wait for a slot without taking a core. Unbounded, 64 parallel
+/// searches on 16 cores doubled the p99; on the async workers, a cheap reverse request waited
+/// twice as long behind them. A panic answers 500.
+async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) -> std::result::Result<T, ApiError> {
+    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
+    let slots = SLOTS.get_or_init(|| tokio::sync::Semaphore::new(std::thread::available_parallelism().map_or(4, |n| n.get())));
+    let _slot = slots.acquire().await.map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("request failed: {e}")))?;
+    tokio::task::spawn_blocking(work).await.map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("request failed: {e}")))
+}
+
+/// What the module answers, as an HTTP response.
+fn response(r: module::Response) -> Response {
+    let status = StatusCode::from_u16(r.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    (status, [(header::CONTENT_TYPE, r.content_type)], r.body).into_response()
+}
+
+/// The handler of one route of a module: the request as data, answered on the pool if the route
+/// asks for it.
+fn handler(module: Arc<dyn Module>, route: &module::Route) -> MethodRouter {
+    let (path, pool) = (route.path.clone(), route.pool);
+    let handle = move |params: RawPathParams, Query(query): Query<Vec<(String, String)>>, headers: HeaderMap, body: Bytes| async move {
+        let received = Instant::now();
+        let mut request = Request {
+            route: path,
+            params: params.iter().map(|(k, v)| (k.to_owned(), v.to_owned())).collect(),
+            query,
+            content_type: headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_owned),
+            body: body.to_vec(),
+            waited_us: 0,
+        };
+        if !pool {
+            return response(module.handle(request));
+        }
+        match blocking(move || {
+            request.waited_us = received.elapsed().as_micros() as u64;
+            module.handle(request)
+        })
+        .await
+        {
+            Ok(r) => response(r),
+            Err(e) => e.into_response(),
+        }
+    };
+    match route.method {
+        Method::Get => get(handle),
+        Method::Post => post(handle),
+    }
+}
+
+/// The routes of every module under its name, and `/` leading to the first page of one.
+fn module_routes(modules: &[Mounted]) -> Router {
+    let mut app = Router::new();
+    for m in modules {
+        for route in &m.description.routes {
+            let path = m.path(&route.path);
+            app = app.route(&path, handler(Arc::clone(&m.module), route));
+            if route.path.is_empty() {
+                // Without the slash, the relative links of the page would leave the module.
+                let to = path.clone();
+                app = app.route(path.trim_end_matches('/'), get(move || async move { Redirect::permanent(&to) }));
+            }
+        }
+    }
+    if let Some(home) = modules.iter().find_map(|m| m.description.home.as_ref().map(|h| m.path(h))) {
+        app = app.route("/", get(move || async move { Redirect::to(&home) }));
+    }
+    app
+}
+
+/// The paths that never need an API key: the pages the modules declare public.
+fn public_paths(modules: &[Mounted]) -> HashSet<String> {
+    let mut public = HashSet::new();
+    for m in modules {
+        for route in m.description.routes.iter().filter(|r| r.public) {
+            let path = m.path(&route.path);
+            public.insert(path.trim_end_matches('/').to_owned());
+            public.insert(path);
+        }
+    }
+    public
+}
+
+pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: Access, contact: Option<String>) -> Router {
+    let names: Vec<String> = modules.iter().map(|m| m.name().to_owned()).collect();
+    let (attribution_bundles, attribution_modules) = (bundles.clone(), modules.to_vec());
+    let docs = docs(modules);
+    let shared_routes = Router::new()
         .route(
             "/v1/attribution",
             get(move || {
-                let body = attribution(attribution_bundles.as_deref(), contact.as_deref());
+                let body = attribution(&attribution_modules, attribution_bundles.as_deref(), contact.as_deref());
                 async move { Json(body) }
             }),
         )
-        .route("/v1/attribution/method", get(|| async { ([(axum::http::header::CONTENT_TYPE, "text/markdown; charset=utf-8")], FUSION_METHOD) }))
-        .route("/openapi.yaml", get(|| async { ([(axum::http::header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
-        .route("/docs", get(|| async { axum::response::Html(DOCS) }));
+        .route("/openapi.yaml", get(|| async { ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
+        .route("/docs", get(move || async move { axum::response::Html(docs) }));
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
         let bundles = bundles.clone();
@@ -160,37 +278,29 @@ pub fn router(modules: &[Arc<dyn Module>], bundles: Option<Arc<BundleManager>>, 
             async move { Json(json!({ "status": "ok", "modules": names, "bundle": version })) }
         }),
     );
-    let tracked = modules
-        .iter()
-        .fold(health, |app, m| app.merge(m.router()))
-        .route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
+    let tracked = health.merge(module_routes(modules)).route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
     let exposed = Arc::clone(&metrics);
-    let modules = modules.to_vec();
+    let mounted = modules.to_vec();
     let metrics_route = Router::new().route(
         "/metrics",
         get(move || {
             let mut text = exposed.render(version().as_deref());
-            for m in &modules {
-                m.metrics(&mut text);
+            for m in &mounted {
+                m.module.metrics(&mut text);
             }
-            async move { ([(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")], text) }
+            async move { ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text) }
         }),
     );
+    let guard = access::Guard::new(access, public_paths(modules));
     // A panic in one request becomes a 500 for that request only.
     tracked
         .merge(metrics_route)
-        .merge(attribution_routes)
-        .layer(axum::middleware::from_fn_with_state(Arc::new(access::Guard::new(access)), access::check))
+        .merge(shared_routes)
+        .layer(axum::middleware::from_fn_with_state(Arc::new(guard), access::check))
         .layer(tower_http::catch_panic::CatchPanicLayer::new())
 }
 
-pub async fn serve(
-    addr: SocketAddr,
-    modules: Vec<Arc<dyn Module>>,
-    bundles: Option<BundleSource>,
-    access: Access,
-    contact: Option<String>,
-) -> Result<()> {
+pub async fn serve(addr: SocketAddr, modules: Vec<Mounted>, bundles: Option<BundleSource>, access: Access, contact: Option<String>) -> Result<()> {
     let manager = bundles.map(|source| Arc::new(BundleManager::new(source, modules.clone())));
     if let Some(m) = &manager {
         let initial = Arc::clone(m);
@@ -204,14 +314,14 @@ pub async fn serve(
     }
     let app = router(&modules, manager, access, contact);
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    tracing::info!(%addr, modules = ?modules.iter().map(|m| m.name()).collect::<Vec<_>>(), "listening");
+    tracing::info!(%addr, modules = ?modules.iter().map(|m| m.name().to_owned()).collect::<Vec<_>>(), "listening");
     axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>())
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
     for m in &modules {
-        m.shutdown()?;
+        m.module.shutdown()?;
     }
     Ok(())
 }
@@ -226,43 +336,6 @@ impl ApiError {
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self { status, message: message.into() }
     }
-
-    pub fn unavailable(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
-    }
-
-    pub fn bad_request(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, message)
-    }
-
-    pub fn not_found(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::NOT_FOUND, message)
-    }
-
-    pub fn status(&self) -> StatusCode {
-        self.status
-    }
-
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-}
-
-/// Runs the CPU-bound work of a request (parsing, search) on the blocking pool, so the async
-/// workers keep accepting connections and answering cheap routes meanwhile; at most one such job
-/// per core runs at once, the rest wait for a slot without taking a core. Unbounded, 64 parallel
-/// searches on 16 cores doubled the p99; on the async workers, a cheap reverse request waited
-/// twice as long behind them. A panic answers 500.
-pub async fn blocking<T: Send + 'static>(
-    work: impl FnOnce() -> std::result::Result<T, ApiError> + Send + 'static,
-) -> std::result::Result<T, ApiError> {
-    static SLOTS: std::sync::OnceLock<tokio::sync::Semaphore> = std::sync::OnceLock::new();
-    let slots = SLOTS.get_or_init(|| tokio::sync::Semaphore::new(std::thread::available_parallelism().map_or(4, |n| n.get())));
-    let _slot = slots.acquire().await.map_err(|e| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("request failed: {e}")))?;
-    match tokio::task::spawn_blocking(work).await {
-        Ok(result) => result,
-        Err(e) => Err(ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("request failed: {e}"))),
-    }
 }
 
 impl IntoResponse for ApiError {
@@ -275,7 +348,8 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use axum::body::{Body, to_bytes};
-    use axum::http::Request;
+    use geko_module_sdk::bundle::{BundleModule, FORMAT};
+    use geko_module_sdk::module::{ModuleName, Route};
     use std::sync::Mutex;
     use tower::ServiceExt;
 
@@ -285,74 +359,118 @@ mod tests {
     }
 
     impl Module for Fake {
-        fn name(&self) -> ModuleName {
-            ModuleName::Tiles
+        fn describe(&self) -> Description {
+            let route = |method, path: &str, pool, public| Route { method, path: path.into(), pool, public };
+            Description {
+                name: ModuleName::new("fake").unwrap(),
+                version: "1.0.0".into(),
+                contract: module::CONTRACT,
+                routes: vec![
+                    route(Method::Get, "", false, true),
+                    route(Method::Get, "v1/echo/{id}", true, false),
+                    route(Method::Post, "v1/body", false, false),
+                ],
+                home: Some(String::new()),
+                openapi: Some("openapi.yaml".into()),
+                attribution: Some(json!({ "notice": "fake data" })),
+                commands: vec![],
+            }
         }
         fn load(&self, bundle: &BundleView) -> Result<()> {
-            self.loaded.lock().unwrap().push(bundle.manifest.version.clone());
+            self.loaded.lock().unwrap().push(format!("{} {}", bundle.manifest.version, bundle.module.meta["n"]));
             Ok(())
         }
-        fn router(&self) -> Router {
-            Router::new().route("/fake", get(|| async { "fake" }))
-        }
-        fn shutdown(&self) -> Result<()> {
-            Ok(())
+        fn handle(&self, r: Request) -> module::Response {
+            let body = json!({ "route": r.route, "params": r.params, "query": r.query, "body": String::from_utf8_lossy(&r.body) });
+            module::Response::new(200, "application/json", body.to_string())
         }
     }
 
-    #[tokio::test]
-    async fn health_lists_active_modules() {
-        let app = router(&[Arc::new(Fake::default())], None, Access::default(), None);
-        let res = app.oneshot(Request::get("/health").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let body: serde_json::Value = serde_json::from_slice(&to_bytes(res.into_body(), 1024).await.unwrap()).unwrap();
-        assert_eq!(body["modules"], json!(["tiles"]));
+    fn app(access: Access) -> Router {
+        router(&[Mounted::new(Arc::new(Fake::default()))], None, access, Some("mail@example.org".into()))
+    }
+
+    async fn get_json(app: &Router, uri: &str) -> (StatusCode, serde_json::Value) {
+        let res = app.clone().oneshot(axum::http::Request::get(uri).body(Body::empty()).unwrap()).await.unwrap();
+        let status = res.status();
+        let bytes = to_bytes(res.into_body(), 1 << 20).await.unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
     }
 
     #[tokio::test]
-    async fn serves_the_api_reference_and_its_browser() {
-        let app = router(&[Arc::new(Fake::default())], None, Access::default(), None);
-        let res = app.clone().oneshot(Request::get("/openapi.yaml").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
-        let spec = to_bytes(res.into_body(), 1 << 20).await.unwrap();
-        assert!(spec.starts_with(b"openapi: 3.1"));
-        let res = app.oneshot(Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(res.status(), StatusCode::OK);
+    async fn mounts_the_routes_of_a_module_under_its_name() {
+        let app = app(Access::default());
+        let (status, body) = get_json(&app, "/fake/v1/echo/a%20b?x=1&y=%C3%B1").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["route"], "v1/echo/{id}");
+        assert_eq!(body["params"], json!([["id", "a b"]]));
+        assert_eq!(body["query"], json!([["x", "1"], ["y", "ñ"]]));
+        let res = app
+            .clone()
+            .oneshot(axum::http::Request::post("/fake/v1/body").body(Body::from("payload")).unwrap())
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&to_bytes(res.into_body(), 1 << 20).await.unwrap()).unwrap();
+        assert_eq!(body["body"], "payload");
+        assert_eq!(get_json(&app, "/v1/echo/x").await.0, StatusCode::NOT_FOUND, "only under its name");
+
+        let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.headers()[header::LOCATION], "/fake/");
+        let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
+        assert_eq!(res.headers()[header::LOCATION], "/fake/");
+    }
+
+    #[tokio::test]
+    async fn health_attribution_and_docs_list_the_modules() {
+        let app = app(Access::default());
+        assert_eq!(get_json(&app, "/health").await.1["modules"], json!(["fake"]));
+        let (_, a) = get_json(&app, "/v1/attribution").await;
+        assert_eq!(a["fake"]["notice"], "fake data");
+        assert_eq!(a["contact"], "mail@example.org");
+        let res = app.clone().oneshot(axum::http::Request::get("/openapi.yaml").body(Body::empty()).unwrap()).await.unwrap();
+        assert!(to_bytes(res.into_body(), 1 << 20).await.unwrap().starts_with(b"openapi: 3.1"));
+        let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.contains("swagger-ui") && page.contains("/openapi.yaml"), "{page}");
+        assert!(page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
     }
 
-    fn publish(dir: &std::path::Path, version: &str) {
+    #[tokio::test]
+    async fn the_pages_of_a_module_need_no_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        assert_eq!(get_json(&app, "/fake/").await.0, StatusCode::OK);
+        assert_eq!(get_json(&app, "/fake/v1/echo/x").await.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(get_json(&app, "/fake/v1/echo/x?api_key=k").await.0, StatusCode::OK);
+    }
+
+    fn publish(dir: &std::path::Path, version: &str, contract: u32) {
         let root = dir.join(version);
         std::fs::create_dir_all(&root).unwrap();
-        BundleManifest {
-            version: version.into(),
-            created_unix: 0,
-            modules: vec![],
-            segments: vec![],
-            licenses: vec![],
-            artifacts: vec![],
-        }
-        .write(&root)
-        .unwrap();
+        let part = BundleModule { name: ModuleName::new("fake").unwrap(), version: "1.0.0".into(), contract, meta: json!({ "n": version }) };
+        BundleManifest { format: FORMAT, version: version.into(), created_unix: 0, modules: vec![part], licenses: vec![], artifacts: vec![] }
+            .write(&root)
+            .unwrap();
         std::fs::write(dir.join("current"), version).unwrap();
     }
 
     #[test]
-    fn manager_loads_only_new_versions() {
+    fn manager_loads_only_new_versions_of_a_compatible_contract() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(Fake::default());
         let manager = BundleManager::new(
             BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None },
-            vec![fake.clone() as Arc<dyn Module>],
+            vec![Mounted::new(fake.clone())],
         );
         assert!(!manager.refresh().unwrap(), "nothing published yet");
-        publish(dir.path(), "v1");
+        publish(dir.path(), "v1", module::CONTRACT);
         assert!(manager.refresh().unwrap());
         assert!(!manager.refresh().unwrap());
-        publish(dir.path(), "v2");
+        publish(dir.path(), "v2", module::CONTRACT);
         assert!(manager.refresh().unwrap());
-        assert_eq!(*fake.loaded.lock().unwrap(), ["v1", "v2"]);
+        assert_eq!(*fake.loaded.lock().unwrap(), [r#"v1 "v1""#, r#"v2 "v2""#]);
         assert_eq!(manager.version().as_deref(), Some("v2"));
+        publish(dir.path(), "v3", module::CONTRACT + 1);
+        let err = manager.refresh().unwrap_err().to_string();
+        assert!(err.contains("contract"), "{err}");
+        assert_eq!(manager.version().as_deref(), Some("v2"), "the previous one stays");
     }
 }

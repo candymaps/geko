@@ -175,9 +175,8 @@ pub fn reverse_index(dir: &std::path::Path) -> Result<Box<dyn geko_core::ports::
 
 /// Opens a bundle segment with the providers compiled into this binary. Each provider checks
 /// that the artifacts were written in a format it reads.
-#[cfg(feature = "geocoder")]
-pub fn segment_opener(preload: bool) -> geko_module_geocoder::SegmentOpener {
-    Arc::new(move |dir: &std::path::Path, segment: &geko_core::bundle::Segment| {
+pub fn segment_opener(preload: bool) -> crate::serve::SegmentOpener {
+    Arc::new(move |dir: &std::path::Path, segment: &geko_core::segment::Segment| {
         let country = geko_core::country::CountryCode::new(&segment.country)?;
         // The pack the segment was built with, which the bundle carries: on a machine that only
         // serves, there is no other. Loaded on every reload, since a new bundle may bring another.
@@ -185,7 +184,7 @@ pub fn segment_opener(preload: bool) -> geko_module_geocoder::SegmentOpener {
             bundled if bundled.is_dir() => Box::leak(Box::new(geko_country_pack::CountryPack::load(&bundled)?)),
             _ => geko_country_pack::get(country)?,
         };
-        Ok(geko_module_geocoder::Segment {
+        Ok(crate::serve::Segment {
             country,
             engine: geocode_engine(&dir.join("geocode"), Box::new(pack.normalizer()), preload)?,
             reverse: reverse_index(&dir.join("reverse"))?,
@@ -194,7 +193,6 @@ pub fn segment_opener(preload: bool) -> geko_module_geocoder::SegmentOpener {
     })
 }
 
-/// Formats of the index providers compiled into this binary, for the bundle manifest.
 /// Code version of the fusion and of the canonical dataset it writes.
 pub const FUSION_CODE: &str = code!("GEKO_BUILD");
 
@@ -218,8 +216,8 @@ pub fn reverse_code() -> &'static str {
     ""
 }
 
-pub fn index_formats() -> (geko_core::bundle::ProviderFormat, geko_core::bundle::ProviderFormat) {
-    let format = |provider: &str, version: u32| geko_core::bundle::ProviderFormat { provider: provider.into(), version };
+pub fn index_formats() -> (geko_core::segment::ProviderFormat, geko_core::segment::ProviderFormat) {
+    let format = |provider: &str, version: u32| geko_core::segment::ProviderFormat { provider: provider.into(), version };
     #[cfg(all(feature = "geocode-fst", feature = "reverse-rstar"))]
     return (format(geocode_fst::PROVIDER, geocode_fst::VERSION), format(reverse_rstar::PROVIDER, reverse_rstar::VERSION));
     #[allow(unreachable_code)]
@@ -347,7 +345,6 @@ pub fn instantiate(config: &Config, registry: &BTreeMap<&'static str, Factory>, 
 mod tests {
     use super::*;
     use geko_core::model::License;
-    use geko_core::module::ModuleName;
     use geko_core::ports::{DatasetRequest, Downloader, FetchReport, RawDir, SourceStats, StagingDir};
     use geko_core::scope::{Coverage, Partition, Scope};
 
@@ -362,9 +359,6 @@ mod tests {
         }
         fn coverage(&self) -> Coverage {
             Coverage::Global
-        }
-        fn used_by(&self) -> &'static [ModuleName] {
-            &[ModuleName::Geocoder]
         }
         fn plan(&self, _: &Scope, _: &dyn Downloader, _: &RawDir) -> Result<Vec<DatasetRequest>> {
             Ok(vec![])
@@ -385,9 +379,9 @@ mod tests {
     #[test]
     fn a_required_source_cannot_be_disabled() {
         let registry = BTreeMap::from([("base", Factory { create: |_, _| Ok(Arc::new(Fake)), code: "test", required: true })]);
-        assert_eq!(instantiate(&Config::parse("").unwrap(), &registry, &Packs::new()).unwrap().enabled.len(), 1);
-        assert_eq!(instantiate(&Config::parse("[sources.base]\nenabled = true\n").unwrap(), &registry, &Packs::new()).unwrap().enabled.len(), 1);
-        let err = instantiate(&Config::parse("[sources.base]\nenabled = false\n").unwrap(), &registry, &Packs::new()).err().unwrap();
+        assert_eq!(instantiate(&Config::parse("", "").unwrap(), &registry, &Packs::new()).unwrap().enabled.len(), 1);
+        assert_eq!(instantiate(&Config::parse("[sources.base]\nenabled = true\n", "").unwrap(), &registry, &Packs::new()).unwrap().enabled.len(), 1);
+        let err = instantiate(&Config::parse("[sources.base]\nenabled = false\n", "").unwrap(), &registry, &Packs::new()).err().unwrap();
         assert!(err.to_string().contains("cannot be disabled"), "{err}");
     }
 
@@ -395,7 +389,7 @@ mod tests {
     #[test]
     fn osm_mirror_overrides_auto() {
         let parse = |text: &str| -> source_osm::OsmConfig {
-            let config = Config::parse(text).unwrap();
+            let config = Config::parse(text, "").unwrap();
             parse_section("osm", config.sources.get("osm").unwrap_or(&toml::Table::new())).unwrap()
         };
         assert_eq!(parse("").mirror, "auto");
@@ -404,13 +398,13 @@ mod tests {
 
     #[test]
     fn sources_are_used_by_default_unless_disabled() {
-        let config = Config::parse("[sources.fake]\nenabled = false\n").unwrap();
+        let config = Config::parse("[sources.fake]\nenabled = false\n", "").unwrap();
         let result = instantiate(&config, &fake_registry(), &Packs::new()).unwrap();
         assert!(result.enabled.is_empty());
         assert_eq!(result.skipped, [SkippedSource { id: SourceId("fake".into()), reason: SkipReason::Disabled }]);
 
         for text in ["[sources.fake]\n", ""] {
-            let result = instantiate(&Config::parse(text).unwrap(), &fake_registry(), &Packs::new()).unwrap();
+            let result = instantiate(&Config::parse(text, "").unwrap(), &fake_registry(), &Packs::new()).unwrap();
             assert_eq!(result.enabled.len(), 1, "{text:?}: a source needs no section");
             assert!(result.skipped.is_empty());
         }
@@ -421,17 +415,17 @@ mod tests {
     fn a_declared_source_takes_the_section_over_its_declaration() {
         let es = CountryCode::new("ES").unwrap();
         let packs = Packs::from([(es, geko_country_pack::repo("ES"))]);
-        let config = Config::parse("[sources.cartociudad]\nmax_unchanged_days = 90\n").unwrap();
+        let config = Config::parse("[sources.cartociudad]\nmax_unchanged_days = 90\n", "").unwrap();
         let result = instantiate(&config, &fake_registry(), &packs).unwrap();
         let ids: Vec<String> = result.enabled.iter().map(|s| s.id().0).collect();
         assert_eq!(ids, ["fake", "cartociudad"]);
         assert!(result.codes["cartociudad"].contains(&packs[&es].source_codes["cartociudad"]));
 
-        let off = Config::parse("[sources.cartociudad]\nenabled = false\n").unwrap();
+        let off = Config::parse("[sources.cartociudad]\nenabled = false\n", "").unwrap();
         assert_eq!(instantiate(&off, &fake_registry(), &packs).unwrap().enabled.len(), 1);
-        let bad = Config::parse("[sources.cartociudad]\nmax_age = 7\n").unwrap();
+        let bad = Config::parse("[sources.cartociudad]\nmax_age = 7\n", "").unwrap();
         assert!(instantiate(&bad, &fake_registry(), &packs).is_err());
-        let moved = Config::parse("[sources.cartociudad]\nmax_age_days = 7\n").unwrap();
+        let moved = Config::parse("[sources.cartociudad]\nmax_age_days = 7\n", "").unwrap();
         let error = instantiate(&moved, &fake_registry(), &packs).err().unwrap().to_string();
         assert!(error.contains("[data] max_age_days"), "{error}");
     }
@@ -444,17 +438,17 @@ mod tests {
 
     #[test]
     fn provider_sections_never_see_the_enabled_key() {
-        let config = Config::parse("[sources.x]\nenabled = true\nmirror = \"m\"\n").unwrap();
+        let config = Config::parse("[sources.x]\nenabled = true\nmirror = \"m\"\n", "").unwrap();
         let parsed: SectionConfig = parse_section("x", &config.sources["x"]).unwrap();
         assert_eq!(parsed.mirror, "m");
-        let bad = Config::parse("[sources.x]\nmirorr = \"m\"\n").unwrap();
+        let bad = Config::parse("[sources.x]\nmirorr = \"m\"\n", "").unwrap();
         let err = parse_section::<SectionConfig>("x", &bad.sources["x"]).unwrap_err();
         assert!(err.to_string().contains("[sources.x]"), "{err}");
     }
 
     #[test]
     fn unknown_source_is_an_error() {
-        let config = Config::parse("[sources.osmm]\n").unwrap();
+        let config = Config::parse("[sources.osmm]\n", "").unwrap();
         let err = instantiate(&config, &fake_registry(), &Packs::new()).err().unwrap();
         assert!(err.to_string().contains("unknown source `osmm`"), "{err}");
         assert!(err.to_string().contains("available: fake"), "{err}");

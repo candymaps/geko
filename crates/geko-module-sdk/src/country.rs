@@ -1,6 +1,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::{GekoError, Result};
 
 /// ISO 3166-1 alpha-2 code, stored uppercase.
@@ -37,6 +39,18 @@ impl FromStr for CountryCode {
 
     fn from_str(s: &str) -> Result<Self> {
         Self::new(s)
+    }
+}
+
+impl Serialize for CountryCode {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CountryCode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        Self::new(&String::deserialize(d)?).map_err(serde::de::Error::custom)
     }
 }
 
@@ -79,6 +93,18 @@ impl FromStr for RegionCode {
 
     fn from_str(s: &str) -> Result<Self> {
         Self::new(s)
+    }
+}
+
+impl Serialize for RegionCode {
+    fn serialize<S: Serializer>(&self, s: S) -> std::result::Result<S::Ok, S::Error> {
+        s.serialize_str(&self.0)
+    }
+}
+
+impl<'de> Deserialize<'de> for RegionCode {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        Self::new(&String::deserialize(d)?).map_err(serde::de::Error::custom)
     }
 }
 

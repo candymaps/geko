@@ -2,201 +2,37 @@ openapi: 3.1.0
 info:
   title: geko
   version: "1"
-  summary: Geocoder with OSM and official national sources.
+  summary: Geocoder and vector tile server.
   description: |
-    Forward and reverse geocoding, autocomplete and lookup by id (PROJECT.md §10). The routes and
-    parameters follow Pelias where they mean the same, so Pelias clients work with few changes:
-    `focus.point.lat`, `point.lat`… are accepted beside geko's own names.
+    What every module of geko shares: health, metrics and the attribution of the served data.
+    Each active module serves its own routes under its name (`/geocoder/…`, `/tiles/…`), with its
+    own reference at `/<module>/openapi.yaml`; `/docs` browses them all.
 
-    Every response is a GeoJSON `FeatureCollection`, with `geocoding` describing the request and
-    one `Feature` per result, best first. Coordinates are WGS 84 longitude, latitude.
+    With `[serve] api_keys`, a request carries a key (`Authorization: Bearer`, `X-Api-Key` or
+    `api_key=`), except `/`, `/health`, `/v1/attribution` and the pages of the modules.
 servers:
   - url: /
     description: The geko serving this document
 paths:
-  /v1/search:
+  /:
     get:
-      summary: Forward geocoding of a complete query.
-      description: |
-        Addresses ("Calle Mayor 23, Alcalá"), streets, places, POIs, postcodes and coordinates
-        ("39.57, 2.65"). Typos are tolerated. A time budget (`[serve] search_budget_ms`) bounds
-        the secondary readings of the query; the likeliest one always completes.
-      parameters:
-        - $ref: "#/components/parameters/text"
-        - $ref: "#/components/parameters/size"
-        - $ref: "#/components/parameters/focusLat"
-        - $ref: "#/components/parameters/focusLon"
-        - $ref: "#/components/parameters/boundaryCountry"
-        - $ref: "#/components/parameters/rectMinLat"
-        - $ref: "#/components/parameters/rectMinLon"
-        - $ref: "#/components/parameters/rectMaxLat"
-        - $ref: "#/components/parameters/rectMaxLon"
-        - $ref: "#/components/parameters/lang"
-        - $ref: "#/components/parameters/admin"
-        - $ref: "#/components/parameters/debug"
+      summary: Leads to the page of the first active module that has one (the demo of the geocoder).
       responses:
-        "200": { $ref: "#/components/responses/Results" }
-        "400": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-  /v1/autocomplete:
-    get:
-      summary: Results for a query being typed.
-      description: |
-        Like `/v1/search`, but the last word may be incomplete ("Calle Mayor 2, Alc"), and a name
-        that starts with what was typed ranks before one that only contains it. Meant to be
-        called on every keystroke: its time budget is shorter (`[serve] autocomplete_budget_ms`).
-      parameters:
-        - $ref: "#/components/parameters/text"
-        - $ref: "#/components/parameters/size"
-        - $ref: "#/components/parameters/focusLat"
-        - $ref: "#/components/parameters/focusLon"
-        - $ref: "#/components/parameters/boundaryCountry"
-        - $ref: "#/components/parameters/rectMinLat"
-        - $ref: "#/components/parameters/rectMinLon"
-        - $ref: "#/components/parameters/rectMaxLat"
-        - $ref: "#/components/parameters/rectMaxLon"
-        - $ref: "#/components/parameters/lang"
-        - $ref: "#/components/parameters/admin"
-        - $ref: "#/components/parameters/debug"
-      responses:
-        "200": { $ref: "#/components/responses/Results" }
-        "400": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-  /v1/reverse:
-    get:
-      summary: The nearest entities to a point, and its administrative units.
-      parameters:
-        - name: lat
-          in: query
-          required: true
-          description: Latitude. `point.lat` is accepted too.
-          schema: { type: number, minimum: -90, maximum: 90 }
-        - name: lon
-          in: query
-          required: true
-          description: Longitude. `point.lon` is accepted too.
-          schema: { type: number, minimum: -180, maximum: 180 }
-        - $ref: "#/components/parameters/size"
-        - name: layers
-          in: query
-          description: |
-            Comma-separated kinds of result: `address`, `street`, `poi` (or `venue`),
-            `postcode`, `locality` (or `place`: localities, neighbourhoods and toponyms).
-            All of them by default.
-          schema: { type: string, example: "address,street" }
-        - $ref: "#/components/parameters/admin"
-        - $ref: "#/components/parameters/debug"
-      responses:
-        "200":
-          description: |
-            The nearest entities, nearest first, each with `distance_m`; `geocoding.admin` lists
-            the administrative units that contain the point, broadest first.
-          content:
-            application/geo+json:
-              schema: { $ref: "#/components/schemas/ReverseCollection" }
-        "400": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-  /v1/place/{id}:
-    get:
-      summary: An entity by its public id.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          description: The `gid` of a result, e.g. `geko:street:es-07040-pz-major`.
-          schema: { type: string }
-      responses:
-        "200": { $ref: "#/components/responses/Results" }
-        "400": { $ref: "#/components/responses/Error" }
-        "404": { $ref: "#/components/responses/Error" }
-        "503": { $ref: "#/components/responses/Error" }
-  /v1/search/structured:
-    get:
-      summary: Search by fields instead of free text. A street (or `address`) makes it an address search; otherwise `locality` searches a place, and `postalcode` alone a postcode.
-      parameters:
-        - { name: address, in: query, schema: { type: string }, description: "Street and number in one field, as written (`Calle Mayor 5`); the country's parser splits them." }
-        - { name: street, in: query, schema: { type: string } }
-        - { name: housenumber, in: query, schema: { type: string } }
-        - { name: postalcode, in: query, schema: { type: string } }
-        - { name: locality, in: query, schema: { type: string } }
-        - { name: country, in: query, schema: { type: string }, description: ISO 3166-1 alpha-2 code; only that country is searched. }
-        - { name: size, in: query, schema: { type: integer } }
-        - { name: lang, in: query, schema: { type: string } }
-        - { name: focus.lat, in: query, schema: { type: number } }
-        - { name: focus.lon, in: query, schema: { type: number } }
-      responses:
-        "200":
-          description: Results, as in `/v1/search`.
-        "400":
-          description: None of address, street, locality or postalcode was given, or a field is too long.
-  /v1/batch:
-    post:
-      summary: Several requests in one, answered in order on a single slot of the search pool. At most `[serve] batch_max` (100 by default).
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [requests]
-              properties:
-                requests:
-                  type: array
-                  items:
-                    type: object
-                    required: [route]
-                    properties:
-                      route: { type: string, enum: [search, autocomplete, structured, reverse] }
-                      params: { type: object, additionalProperties: { type: string }, description: The query parameters of that route. }
-      responses:
-        "200":
-          description: "`results`, one per request in order: the answer of its route, or `{error, status}` if that request failed."
-        "400":
-          description: More requests than `batch_max`, or a body that is not JSON.
-  /pelias/v1/search:
-    get:
-      summary: "Pelias-compatible mode: the parameters and answer format of Pelias. Also /pelias/v1/autocomplete, /pelias/v1/search/structured, /pelias/v1/reverse and /pelias/v1/place?ids=. Layers and properties are translated as described in PROJECT.md §10."
-      parameters:
-        - { name: text, in: query, required: true, schema: { type: string } }
-        - { name: size, in: query, schema: { type: integer } }
-        - { name: layers, in: query, schema: { type: string }, description: "Pelias layers: venue, address, street, postalcode, locality, localadmin, neighbourhood, county, region." }
-        - { name: focus.point.lat, in: query, schema: { type: number } }
-        - { name: focus.point.lon, in: query, schema: { type: number } }
-        - { name: boundary.country, in: query, schema: { type: string } }
-        - { name: boundary.circle.lat, in: query, schema: { type: number } }
-        - { name: boundary.circle.lon, in: query, schema: { type: number } }
-        - { name: boundary.circle.radius, in: query, schema: { type: number, default: 50 }, description: "Kilometres." }
-        - { name: lang, in: query, schema: { type: string } }
-      responses:
-        "200":
-          description: "A Pelias FeatureCollection. Each result has the units that contain it: country, region and county (with `_a` codes), localadmin, locality and neighbourhood."
-  /photon/api:
-    get:
-      summary: "Photon-compatible mode: the parameters and answer format of Photon, as you type. Also /photon/reverse?lat=&lon=. Layers and properties are translated as described in PROJECT.md §10."
-      parameters:
-        - { name: q, in: query, required: true, schema: { type: string } }
-        - { name: limit, in: query, schema: { type: integer } }
-        - { name: lat, in: query, schema: { type: number }, description: "With lon, the focus of the search." }
-        - { name: lon, in: query, schema: { type: number } }
-        - { name: lang, in: query, schema: { type: string } }
-        - { name: layer, in: query, schema: { type: string }, description: "Repeatable: house, street, city, locality, district, county, state, country." }
-        - { name: bbox, in: query, schema: { type: string }, description: "minLon,minLat,maxLon,maxLat." }
-        - { name: osm_tag, in: query, schema: { type: string }, description: "Repeatable: key, key:value, :value, negated with a leading !, or key:!value." }
-      responses:
-        "200":
-          description: "A Photon FeatureCollection: type, name, housenumber, street, postcode, countrycode, country, state, county, city, locality, district, osm_key, osm_value, osm_type, osm_id and gid."
+        "303":
+          description: Where the page is.
   /v1/attribution:
     get:
-      summary: Licenses and attributions of the served data, and the derivative database notice (ODbL 4.6). Never needs an API key.
+      summary: Licenses and attributions of the served data, and what each module adds (the derivative database notice of the geocoder, ODbL 4.6). Never needs an API key.
       responses:
         "200":
-          description: Sources of the bundle and where the method of fusing them is described.
+          description: Sources of the bundle and, under the name of each module, what it adds.
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   bundle: { type: [string, "null"] }
+                  contact: { type: [string, "null"], description: "Where to ask for the code that reproduces the served data ([serve] attribution_contact)." }
                   sources:
                     type: array
                     items:
@@ -206,35 +42,29 @@ paths:
                         license: { type: string }
                         attribution: { type: string }
                         url: { type: [string, "null"] }
-                  derivative_database:
+                  geocoder:
                     type: object
                     properties:
-                      license: { type: string }
-                      notice: { type: string }
-                      method: { type: string, description: Path of the description of the fusion method. }
-                      contact: { type: [string, "null"], description: Where to ask for the code that reproduces the database. }
-  /v1/attribution/method:
-    get:
-      summary: Description of the method that fuses the sources into the served database (Markdown).
-      responses:
-        "200":
-          description: The method.
-          content:
-            text/markdown: {}
+                      derivative_database:
+                        type: object
+                        properties:
+                          license: { type: string }
+                          notice: { type: string }
+                          method: { type: string, description: Path of the description of the fusion method. }
   /openapi.yaml:
     get:
       summary: This document.
       responses:
         "200":
-          description: The OpenAPI reference of the API.
+          description: The OpenAPI reference of what every module shares.
           content:
             application/yaml: {}
   /docs:
     get:
-      summary: This document, browsable (Swagger UI).
+      summary: This document and those of the active modules, browsable (Swagger UI).
       responses:
         "200":
-          description: An HTML page that loads Swagger UI from cdn.jsdelivr.net and reads /openapi.yaml.
+          description: An HTML page that loads Swagger UI from cdn.jsdelivr.net and reads every reference.
           content:
             text/html: {}
   /health:
@@ -257,231 +87,11 @@ paths:
       description: |
         `geko_requests_total{route,status}` (status class `2xx`…`5xx`),
         `geko_request_seconds{route}` (latency histogram), `geko_bundle_info{version}` and
-        `geko_uptime_seconds`. `route` is the route pattern (`/v1/place/{id}`), not the path.
-        Requests slower than `[serve] slow_query_ms` are also logged with their query.
+        `geko_uptime_seconds`. `route` is the route pattern (`/geocoder/v1/place/{id}`), not the path.
+        The modules add their own (`geko_merged_duplicates_total`, `geko_cache_lookups_total`…).
       responses:
         "200":
           description: The metrics.
           content:
             text/plain:
               schema: { type: string }
-components:
-  parameters:
-    text:
-      name: text
-      in: query
-      required: true
-      description: The query, at most 256 characters.
-      schema: { type: string, maxLength: 256, example: "Plaça Major, Palma" }
-    size:
-      name: size
-      in: query
-      description: Number of results; `[serve]` sets the default (10) and the maximum (40).
-      schema: { type: integer, minimum: 1, default: 10 }
-    focusLat:
-      name: focus.lat
-      in: query
-      description: |
-        Latitude of a point that results near it are preferred to (the map centre or the user's
-        location); needs `focus.lon`. `focus.point.lat` is accepted too.
-      schema: { type: number, minimum: -90, maximum: 90 }
-    focusLon:
-      name: focus.lon
-      in: query
-      description: Longitude of the focus; `focus.point.lon` is accepted too.
-      schema: { type: number, minimum: -180, maximum: 180 }
-    boundaryCountry:
-      name: boundary.country
-      in: query
-      description: Comma-separated ISO 3166-1 codes; only results in these countries.
-      schema: { type: string, example: "ES" }
-    rectMinLat:
-      name: boundary.rect.min_lat
-      in: query
-      description: Only results inside this rectangle; the four `boundary.rect.*` go together.
-      schema: { type: number }
-    rectMinLon:
-      name: boundary.rect.min_lon
-      in: query
-      schema: { type: number }
-    rectMaxLat:
-      name: boundary.rect.max_lat
-      in: query
-      schema: { type: number }
-    rectMaxLon:
-      name: boundary.rect.max_lon
-      in: query
-      schema: { type: number }
-    lang:
-      name: lang
-      in: query
-      description: Accepted and ignored for now (BACKLOG 15).
-      schema: { type: string }
-    admin:
-      name: admin
-      in: query
-      description: "`true` adds to each result the administrative units that contain it (`admin`: kind, name and code, from the country down), as a reverse answer gives them for its point."
-      schema: { type: boolean, default: false }
-    debug:
-      name: debug
-      in: query
-      description: "`true` adds `score` and `local_id` to each result."
-      schema: { type: boolean, default: false }
-  responses:
-    Results:
-      description: Results, best first.
-      content:
-        application/geo+json:
-          schema: { $ref: "#/components/schemas/FeatureCollection" }
-    Error:
-      description: |
-        400: a parameter is missing or invalid. 404: no entity with that id. 503: no bundle is
-        loaded yet.
-      content:
-        application/json:
-          schema:
-            type: object
-            required: [error]
-            properties:
-              error: { type: string }
-  schemas:
-    FeatureCollection:
-      type: object
-      required: [type, geocoding, features]
-      properties:
-        type: { type: string, const: FeatureCollection }
-        geocoding: { $ref: "#/components/schemas/Geocoding" }
-        features:
-          type: array
-          items: { $ref: "#/components/schemas/Feature" }
-    ReverseCollection:
-      allOf:
-        - $ref: "#/components/schemas/FeatureCollection"
-        - type: object
-          properties:
-            geocoding:
-              type: object
-              properties:
-                admin:
-                  type: array
-                  description: Administrative units containing the point, broadest first.
-                  items:
-                    type: object
-                    properties:
-                      kind: { type: string, enum: [country, region, province, municipality, neighbourhood] }
-                      name: { type: string }
-                      code: { type: [string, "null"], description: Official code when the source gives one (INE in Spain). }
-    Geocoding:
-      type: object
-      required: [engine, bundle, query, timing_us]
-      properties:
-        engine: { type: string, example: "geko/0.1.0" }
-        bundle: { type: string, description: "Version of the bundle that answered, e.g. `v2026-10-16T233054`." }
-        attribution: { type: string, description: "Attributions of the sources of the data, to show with the results (licenses and method: `/v1/attribution`)." }
-        query: { type: object, description: "The request as understood (text or point, size)." }
-        timing_us: { type: integer, description: "Time spent in the server, in microseconds, from when the request started being processed." }
-    Feature:
-      type: object
-      required: [type, geometry, properties]
-      properties:
-        type: { type: string, const: Feature }
-        geometry:
-          type: object
-          properties:
-            type: { type: string, const: Point }
-            coordinates:
-              type: array
-              items: { type: number }
-              minItems: 2
-              maxItems: 2
-              description: Longitude, latitude.
-        properties: { $ref: "#/components/schemas/Properties" }
-    Properties:
-      type: object
-      description: |
-        Every result carries the required properties; the others depend on its layer:
-        `address`: `street`, `street_id`, `housenumber`, `postcode`, `postcode_source`.
-        `street`: `locality`, `postcodes` (with house number ranges).
-        `poi`: `category`, `address_id`, `postcode`, `postcode_source`, `wikidata`.
-        `postcode`: `postcode`, `address_count`.
-        `municipality`: `official_ref`, `population`, `postcodes`, `wikidata`.
-        `locality`, `neighbourhood`, `toponym`: `postcode`, `postcode_source`, `wikidata`.
-        `region`, `province`: `wikidata`.
-      example:
-        gid: "geko:address:es-28079-cl-mayor:23"
-        housenumber: "23"
-        label: "Calle Mayor 23, 28013 Madrid"
-        layer: address
-        municipality: Madrid
-        municipality_id: "geko:municipality:es-28079"
-        name: "Calle Mayor 23"
-        postcode: "28013"
-        postcode_source: cartociudad
-        sources: [cartociudad, osm]
-        street: "Calle Mayor"
-        street_id: "geko:street:es-28079-cl-mayor"
-        country: ES
-        confidence: 0.858
-        match_type: exact
-      required: [gid, layer, name, label, country, confidence, match_type]
-      properties:
-        gid:
-          type: string
-          description: |
-            Public id, stable across rebuilds while the entity exists:
-            `geko:<layer>:<country>-<key>`, e.g. `geko:address:es-07040-pz-major:3`.
-        layer:
-          type: string
-          enum: [region, province, municipality, locality, neighbourhood, toponym, postcode, street, address, poi]
-        name: { type: string, description: Name in the main language of the place. }
-        label: { type: string, description: "Name with the context to tell it apart, e.g. `Plaça Major 3, 07002 Palma`." }
-        municipality: { type: [string, "null"] }
-        municipality_id: { type: [string, "null"], description: "`gid` of the municipality." }
-        country: { type: string, description: ISO 3166-1 code. }
-        confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: |
-            Search and autocomplete: the probability that this is the result asked for,
-            calibrated on reference queries (a result at 0.9 is right about nine times in ten).
-            Reverse and lookup by id: the score relative to the best result.
-        match_type:
-          type: string
-          enum: [exact, interpolated, approximate, street_only, locality_only, coordinates, cadastral, kilometric]
-          description: |
-            `approximate`: the house number asked for does not exist; the nearest one on the same
-            side is given. `street_only`: the street exists but not the number. `locality_only`:
-            the locality exists but not the street.
-        distance_m: { type: number, description: "Reverse and queries by coordinates: distance to the point in metres." }
-        postcode: { type: [string, "null"] }
-        postcode_source:
-          type: [string, "null"]
-          description: |
-            Where the postcode comes from: a source (`cartociudad`, `osm`…) or `inferred` from
-            the postcode zones around.
-        postcodes:
-          type: array
-          description: Streets and municipalities, which span several postcodes.
-          items:
-            type: object
-            properties:
-              postcode: { type: string }
-              from: { type: integer, description: "Streets only: lowest house number with this postcode." }
-              to: { type: integer, description: "Streets only: highest house number with this postcode." }
-              addresses: { type: integer }
-              sources: { type: object, additionalProperties: { type: integer }, description: "Addresses of each source, or `inferred`." }
-        sources: { type: array, items: { type: string }, description: Sources fused into this entity. }
-        street: { type: string, description: "Addresses: name of the street." }
-        street_id: { type: string, description: "Addresses: `gid` of the street." }
-        housenumber: { type: string, description: "Addresses: number with its suffix (`23`, `23 bis`)." }
-        locality: { type: [string, "null"], description: "Streets: the locality they are in." }
-        category: { type: string, description: "POIs: their OSM tag, e.g. `tourism=museum`." }
-        address_id: { type: [string, "null"], description: "POIs: `gid` of their address when known." }
-        address_count: { type: integer, description: "Postcodes: addresses with this postcode." }
-        official_ref: { type: [string, "null"], description: "Municipalities: official code (INE in Spain)." }
-        population: { type: [integer, "null"] }
-        wikidata: { type: [string, "null"], description: "Wikidata id, e.g. `Q160112`." }
-        score: { type: number, description: With `debug=true`. }
-        local_id: { type: integer, description: With `debug=true`. }
-      additionalProperties: true

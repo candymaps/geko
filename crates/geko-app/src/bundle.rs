@@ -5,27 +5,12 @@ use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use geko_core::bundle::{Artifact, BundleManifest, CURRENT, CURRENT_VERSION, LicenseNotice, ProviderFormat, Segment, current_version};
-use geko_core::country::CountryCode;
-use geko_core::ports::{Checksum, DownloadRequest, Downloader};
-use geko_core::{GekoError, Result};
+use geko_module_sdk::bundle::{Artifact, BundleManifest, BundleModule, CURRENT, CURRENT_VERSION, FORMAT, LicenseNotice, MANIFEST, current_version};
+use geko_module_sdk::download::{Checksum, DownloadRequest, Downloader};
+use geko_module_sdk::incremental::{self, Key, Stamp};
+use geko_module_sdk::module::BundlePart;
+use geko_module_sdk::{GekoError, Result};
 use sha2::{Digest, Sha256};
-
-use crate::incremental::{self, Key, Stamp};
-
-/// The parts of a segment: the indexes, and the country pack they were built with, which
-/// `serve` reads from the bundle (PROJECT.md §2.4). A segment built before packs were part of
-/// bundles has none.
-const PARTS: [&str; 3] = ["geocode", "reverse", "pack"];
-const OPTIONAL_PART: &str = "pack";
-
-pub struct SegmentToPublish {
-    pub country: CountryCode,
-    /// Working directory with `geocode/`, `reverse/` and `pack/`.
-    pub dir: PathBuf,
-    pub geocode: ProviderFormat,
-    pub reverse: ProviderFormat,
-}
 
 /// `vYYYY-MM-DDTHHMMSS` in UTC; lexicographic order is chronological order.
 pub fn version_name(unix: u64) -> String {
@@ -99,13 +84,20 @@ fn point_current(bundles: &Path, version: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn publish(
-    bundles: &Path,
-    segments: &[SegmentToPublish],
-    modules: Vec<String>,
-    licenses: Vec<LicenseNotice>,
-    keep: usize,
-) -> Result<BundleManifest> {
+/// A part of a module goes into the bundle at a path of its own: relative, inside the bundle, and
+/// never where the manifest is.
+fn checked(part: &BundlePart) -> Result<&BundlePart> {
+    let bad = part.to.is_empty() || part.to.starts_with('/') || part.to == MANIFEST || part.to.split(['/', '\\']).any(|p| p.is_empty() || p == "..");
+    if bad {
+        return Err(GekoError::Data(format!("a module put a part of the bundle at `{}`, outside its place", part.to)));
+    }
+    if !part.from.is_dir() {
+        return Err(GekoError::Data(format!("{} is missing; run `geko build`", part.from.display())));
+    }
+    Ok(part)
+}
+
+pub fn publish(bundles: &Path, parts: &[BundlePart], modules: Vec<BundleModule>, licenses: Vec<LicenseNotice>, keep: usize) -> Result<BundleManifest> {
     fs::create_dir_all(bundles)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let version = version_name(now);
@@ -113,21 +105,10 @@ pub fn publish(
     if staging.exists() {
         fs::remove_dir_all(&staging)?;
     }
-    let mut manifest =
-        BundleManifest { version: version.clone(), created_unix: now, modules, segments: Vec::new(), licenses, artifacts: Vec::new() };
-    for s in segments {
-        let rel = format!("segments/{}", s.country.lowercase());
-        for part in PARTS {
-            let src = s.dir.join(part);
-            if !src.is_dir() {
-                if part == OPTIONAL_PART {
-                    continue;
-                }
-                return Err(GekoError::Data(format!("{} is missing; run `geko build`", src.display())));
-            }
-            link_tree(&src, &staging.join(&rel).join(part), &staging, &mut manifest.artifacts)?;
-        }
-        manifest.segments.push(Segment { country: s.country.to_string(), dir: rel, geocode: s.geocode.clone(), reverse: s.reverse.clone() });
+    let mut manifest = BundleManifest { format: FORMAT, version: version.clone(), created_unix: now, modules, licenses, artifacts: Vec::new() };
+    for part in parts {
+        let part = checked(part)?;
+        link_tree(&part.from, &staging.join(&part.to), &staging, &mut manifest.artifacts)?;
     }
     manifest.write(&staging)?;
     let target = bundles.join(&version);
@@ -146,32 +127,24 @@ pub enum Published {
     UpToDate(String),
 }
 
-/// Publishes a new version unless the current one was published from the same segments, modules
-/// and licenses, or `force`. A new version with the same content would only make every server
-/// reload for nothing.
+/// Publishes a new version unless the current one was published from the same parts, modules and
+/// licenses, or `force`. A new version with the same content would only make every server reload
+/// for nothing.
 pub fn publish_incremental(
     bundles: &Path,
-    segments: &[SegmentToPublish],
-    modules: Vec<String>,
+    parts: &[BundlePart],
+    modules: Vec<BundleModule>,
     licenses: Vec<LicenseNotice>,
     keep: usize,
     force: bool,
 ) -> Result<Published> {
-    let mut key = Key::new("publish")
-        .add("modules", &modules.join(","))
-        .add("licenses", &serde_json::to_string(&licenses).map_err(|e| GekoError::Other(e.into()))?);
-    for s in segments {
-        key = key.add("country", s.country.as_str()).add("formats", &format!("{:?} {:?}", s.geocode, s.reverse));
-        for part in PARTS {
-            let dir = s.dir.join(part);
-            if !dir.is_dir() {
-                if part == OPTIONAL_PART {
-                    continue;
-                }
-                return Err(GekoError::Data(format!("{} is missing; run `geko build`", dir.display())));
-            }
-            key = key.add(part, &incremental::output_of(&dir, &[])?);
-        }
+    fn json(v: &impl serde::Serialize) -> Result<String> {
+        serde_json::to_string(v).map_err(|e| GekoError::Other(e.into()))
+    }
+    let mut key = Key::new("publish").add("modules", &json(&modules)?).add("licenses", &json(&licenses)?);
+    for part in parts {
+        let part = checked(part)?;
+        key = key.add(&part.to, &incremental::output_of(&part.from, &[])?);
     }
     let key = key.finish();
     if !force
@@ -186,7 +159,7 @@ pub fn publish_incremental(
         }
         return Ok(Published::UpToDate(stamp.output));
     }
-    let manifest = publish(bundles, segments, modules, licenses, keep)?;
+    let manifest = publish(bundles, parts, modules, licenses, keep)?;
     incremental::record(bundles, &Stamp { key, output: manifest.version.clone(), info: serde_json::Value::Null })?;
     Ok(Published::New(manifest))
 }
@@ -226,7 +199,7 @@ pub fn pull(remote: &str, bundles: &Path, downloader: &dyn Downloader, keep: usi
     if !version.starts_with('v') || version.contains(['/', '\\', '.']) {
         return Err(GekoError::Data(format!("{remote}/{CURRENT_VERSION}: `{version}` is not a bundle version")));
     }
-    if bundles.join(&version).join(geko_core::bundle::MANIFEST).is_file() {
+    if bundles.join(&version).join(MANIFEST).is_file() {
         if current_version(bundles).as_deref() != Some(version.as_str()) {
             point_current(bundles, &version)?;
         }
@@ -238,12 +211,12 @@ pub fn pull(remote: &str, bundles: &Path, downloader: &dyn Downloader, keep: usi
     }
     fs::create_dir_all(&staging)?;
     let url = |path: &str| format!("{remote}/{version}/{path}");
-    let manifest_file = downloads.join(format!("{version}.{}", geko_core::bundle::MANIFEST));
-    downloader.fetch(&DownloadRequest { url: url(geko_core::bundle::MANIFEST), checksum: None }, &manifest_file)?;
-    fs::copy(&manifest_file, staging.join(geko_core::bundle::MANIFEST))?;
+    let manifest_file = downloads.join(format!("{version}.{}", MANIFEST));
+    downloader.fetch(&DownloadRequest { url: url(MANIFEST), checksum: None }, &manifest_file)?;
+    fs::copy(&manifest_file, staging.join(MANIFEST))?;
     let manifest = BundleManifest::read(&staging)?;
     if manifest.version != version {
-        return Err(GekoError::Data(format!("{}: version {} where {version} was published", url(geko_core::bundle::MANIFEST), manifest.version)));
+        return Err(GekoError::Data(format!("{}: version {} where {version} was published", url(MANIFEST), manifest.version)));
     }
     let previous: std::collections::HashMap<String, (String, PathBuf)> = current_version(bundles)
         .and_then(|v| BundleManifest::read(&bundles.join(&v)).ok().map(|m| (v, m)))
@@ -251,7 +224,7 @@ pub fn pull(remote: &str, bundles: &Path, downloader: &dyn Downloader, keep: usi
         .unwrap_or_default();
     for a in &manifest.artifacts {
         if a.path.split('/').any(|p| p.is_empty() || p == "..") {
-            return Err(GekoError::Data(format!("{}: artifact path `{}` leaves the bundle", url(geko_core::bundle::MANIFEST), a.path)));
+            return Err(GekoError::Data(format!("{}: artifact path `{}` leaves the bundle", url(MANIFEST), a.path)));
         }
         let dest = staging.join(&a.path);
         if let Some(parent) = dest.parent() {
@@ -280,6 +253,7 @@ pub fn pull(remote: &str, bundles: &Path, downloader: &dyn Downloader, keep: usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use geko_module_sdk::module::ModuleName;
 
     /// Serves files of a local "remote" bundles directory, as an HTTP mirror would.
     struct Mirror {
@@ -288,19 +262,37 @@ mod tests {
     }
 
     impl Downloader for Mirror {
-        fn fetch(&self, req: &DownloadRequest, dest: &Path) -> Result<geko_core::ports::DownloadOutcome> {
+        fn fetch(&self, req: &DownloadRequest, dest: &Path) -> Result<geko_module_sdk::download::DownloadOutcome> {
             let rel = req.url.strip_prefix("mirror://root/").expect("mirror url");
             self.fetched.lock().unwrap().push(rel.to_owned());
             fs::copy(self.root.join(rel), dest)?;
-            Ok(geko_core::ports::DownloadOutcome { downloaded: true, sha256: sha256(dest)?, size: fs::metadata(dest)?.len() })
+            Ok(geko_module_sdk::download::DownloadOutcome { downloaded: true, sha256: sha256(dest)?, size: fs::metadata(dest)?.len() })
         }
+    }
+
+    fn module(name: &str) -> BundleModule {
+        BundleModule { name: ModuleName::new(name).unwrap(), version: "1.0.0".into(), contract: 1, meta: serde_json::json!({ "segments": [] }) }
+    }
+
+    /// The two parts of a segment of the geocoder, written in `dir`.
+    fn parts(dir: &Path) -> Vec<BundlePart> {
+        for part in ["geocode/hot", "reverse"] {
+            fs::create_dir_all(dir.join(part)).unwrap();
+        }
+        fs::write(dir.join("geocode/hot/a.bin"), b"abc").unwrap();
+        fs::write(dir.join("reverse/points.bin"), b"xyz").unwrap();
+        existing(dir)
+    }
+
+    fn existing(dir: &Path) -> Vec<BundlePart> {
+        ["geocode", "reverse"].map(|p| BundlePart { from: dir.join(p), to: format!("segments/es/{p}") }).to_vec()
     }
 
     #[test]
     fn pulls_only_what_changed() {
         let tmp = tempfile::tempdir().unwrap();
         let (remote, local, work) = (tmp.path().join("remote"), tmp.path().join("local"), tmp.path().join("work"));
-        let first = publish(&remote, &[segment(&work)], vec!["geocoder".into()], Vec::new(), 2).unwrap();
+        let first = publish(&remote, &parts(&work), vec![module("geocoder")], Vec::new(), 2).unwrap();
         let mirror = Mirror { root: remote.clone(), fetched: Default::default() };
         assert_eq!(pull("mirror://root", &local, &mirror, 2).unwrap(), Some(first.version.clone()));
         assert_eq!(current_version(&local), Some(first.version.clone()));
@@ -309,18 +301,13 @@ mod tests {
         // A new version where only the reverse file changed: the geocode file is linked, not fetched.
         std::thread::sleep(std::time::Duration::from_millis(1100));
         fs::write(work.join("reverse/points.bin"), b"new").unwrap();
-        let second = publish(&remote, &[segment_without_rewrite(&work)], vec!["geocoder".into()], Vec::new(), 2).unwrap();
+        let second = publish(&remote, &existing(&work), vec![module("geocoder")], Vec::new(), 2).unwrap();
         mirror.fetched.lock().unwrap().clear();
         assert_eq!(pull("mirror://root", &local, &mirror, 2).unwrap(), Some(second.version.clone()));
         let fetched = mirror.fetched.lock().unwrap().clone();
         assert!(fetched.iter().any(|f| f.ends_with("reverse/points.bin")), "{fetched:?}");
         assert!(!fetched.iter().any(|f| f.ends_with("geocode/hot/a.bin")), "unchanged artifact fetched: {fetched:?}");
         assert_eq!(fs::read(local.join(&second.version).join("segments/es/reverse/points.bin")).unwrap(), b"new");
-    }
-
-    fn segment_without_rewrite(dir: &Path) -> SegmentToPublish {
-        let fmt = |p: &str| ProviderFormat { provider: p.into(), version: 1 };
-        SegmentToPublish { country: CountryCode::new("ES").unwrap(), dir: dir.to_path_buf(), geocode: fmt("g"), reverse: fmt("r") }
     }
 
     #[test]
@@ -330,23 +317,13 @@ mod tests {
         assert_eq!(version_name(951_782_400), "v2000-02-29T000000");
     }
 
-    fn segment(dir: &Path) -> SegmentToPublish {
-        for part in ["geocode/hot", "reverse"] {
-            fs::create_dir_all(dir.join(part)).unwrap();
-        }
-        fs::write(dir.join("geocode/hot/a.bin"), b"abc").unwrap();
-        fs::write(dir.join("reverse/points.bin"), b"xyz").unwrap();
-        let fmt = |p: &str| ProviderFormat { provider: p.into(), version: 1 };
-        SegmentToPublish { country: CountryCode::new("ES").unwrap(), dir: dir.to_path_buf(), geocode: fmt("g"), reverse: fmt("r") }
-    }
-
     #[test]
     fn publishes_switches_current_and_prunes() {
         let work = tempfile::tempdir().unwrap();
         let bundles = tempfile::tempdir().unwrap();
-        let seg = segment(work.path());
+        let parts = parts(work.path());
 
-        let first = publish(bundles.path(), std::slice::from_ref(&seg), vec!["geocoder".into()], vec![], 2).unwrap();
+        let first = publish(bundles.path(), &parts, vec![module("geocoder")], vec![], 2).unwrap();
         assert_eq!(current_version(bundles.path()).as_deref(), Some(first.version.as_str()));
         assert_eq!(first.artifacts.len(), 2);
         assert_eq!(first.artifacts[0].path, "segments/es/geocode/hot/a.bin");
@@ -367,14 +344,28 @@ mod tests {
     }
 
     #[test]
+    fn a_part_stays_in_its_place() {
+        let work = tempfile::tempdir().unwrap();
+        let bundles = tempfile::tempdir().unwrap();
+        parts(work.path());
+        for to in ["../x", "/abs", MANIFEST, "", "a//b"] {
+            let part = BundlePart { from: work.path().join("geocode"), to: to.into() };
+            assert!(publish(bundles.path(), &[part], vec![], vec![], 1).is_err(), "{to:?}");
+        }
+        let missing = BundlePart { from: work.path().join("nothing"), to: "x".into() };
+        let err = publish(bundles.path(), &[missing], vec![], vec![], 1).unwrap_err().to_string();
+        assert!(err.contains("run `geko build`"), "{err}");
+    }
+
+    #[test]
     fn publishes_again_only_when_something_changed() {
         let work = tempfile::tempdir().unwrap();
         let root = tempfile::tempdir().unwrap();
         let bundles = root.path().join("bundles");
-        let seg = segment(work.path());
+        let parts = parts(work.path());
         let publish = |modules: &[&str], force| {
-            let modules = modules.iter().map(|m| m.to_string()).collect();
-            publish_incremental(&bundles, std::slice::from_ref(&seg), modules, vec![], 5, force).unwrap()
+            let modules = modules.iter().map(|m| module(m)).collect();
+            publish_incremental(&bundles, &parts, modules, vec![], 5, force).unwrap()
         };
 
         // Versions are named by the second: wait for a new name before a new publication.
@@ -389,7 +380,7 @@ mod tests {
         assert!(matches!(republish(&["geocoder", "tiles"], false), Published::New(_)), "modules changed");
         assert!(matches!(republish(&["geocoder", "tiles"], true), Published::New(_)), "forced");
         fs::write(work.path().join("reverse/points.bin"), b"new points").unwrap();
-        assert!(matches!(republish(&["geocoder", "tiles"], false), Published::New(_)), "a segment changed");
+        assert!(matches!(republish(&["geocoder", "tiles"], false), Published::New(_)), "a part changed");
         assert!(matches!(publish(&["geocoder", "tiles"], false), Published::UpToDate(_)));
     }
 }

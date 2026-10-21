@@ -1,11 +1,13 @@
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Deserializer, Serialize};
+
 use crate::country::{CountryCode, RegionCode};
 use crate::{GekoError, Result};
 
 /// Countries and regions to download, build and serve.
 /// A country with no regions means the whole country.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Scope {
     countries: BTreeMap<CountryCode, Vec<RegionCode>>,
 }
@@ -49,6 +51,21 @@ impl Scope {
     /// Countries of this scope that a provider with the given coverage serves.
     pub fn covered_by(&self, coverage: &Coverage) -> Vec<CountryCode> {
         self.countries().filter(|c| coverage.covers(*c)).collect()
+    }
+}
+
+/// Checked as `Scope::add` checks it: a module is only handed a scope the host could build.
+impl<'de> Deserialize<'de> for Scope {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            countries: BTreeMap<CountryCode, Vec<RegionCode>>,
+        }
+        let mut scope = Scope::default();
+        for (country, regions) in Raw::deserialize(d)?.countries {
+            scope.add(country, regions).map_err(serde::de::Error::custom)?;
+        }
+        Ok(scope)
     }
 }
 
@@ -106,6 +123,16 @@ mod tests {
         assert!(scope.add(cc("ES"), vec![rc("FR-75")]).is_err());
         scope.add(cc("ES"), vec![]).unwrap();
         assert!(scope.add(cc("ES"), vec![]).is_err());
+    }
+
+    #[test]
+    fn a_scope_crosses_a_boundary_unchanged() {
+        let mut scope = Scope::default();
+        scope.add(cc("ES"), vec![rc("ES-PM")]).unwrap();
+        scope.add(cc("LU"), vec![]).unwrap();
+        let text = serde_json::to_string(&scope).unwrap();
+        assert_eq!(serde_json::from_str::<Scope>(&text).unwrap(), scope);
+        assert!(serde_json::from_str::<Scope>(r#"{"countries":{"ES":["FR-75"]}}"#).is_err());
     }
 
     #[test]

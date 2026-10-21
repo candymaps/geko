@@ -9,40 +9,29 @@ license.workspace = true
 name = "geko"
 path = "src/main.rs"
 
+# The host (docs/MODULES_PLAN.md), with the modules linked into it, each behind its feature.
 [features]
-default = ["geocoder", "tiles", "source-osm", "source-overture", "source-ogc-features", "geocode-fst", "reverse-rstar"]
-geocode-fst = ["dep:geocode-fst"]
-reverse-rstar = ["dep:reverse-rstar"]
+default = ["geocoder", "tiles"]
 geocoder = ["dep:geko-module-geocoder"]
 tiles = ["dep:geko-module-tiles"]
-source-osm = ["dep:source-osm"]
-source-overture = ["dep:source-overture"]
-source-ogc-features = ["dep:source-ogc-features"]
 
 [dependencies]
-geko-core.workspace = true
+geko-module-sdk.workspace = true
 geko-server.workspace = true
-geko-build.workspace = true
 geko-fetch.workspace = true
-geko-geom.workspace = true
 geko-module-geocoder = { workspace = true, optional = true }
 geko-module-tiles = { workspace = true, optional = true }
-source-osm = { workspace = true, optional = true }
-source-overture = { workspace = true, optional = true }
-source-ogc-features = { workspace = true, optional = true }
-geko-country-pack.workspace = true
-geocode-fst = { workspace = true, optional = true }
-reverse-rstar = { workspace = true, optional = true }
-serde_json.workspace = true
 anyhow.workspace = true
-mimalloc = { version = "0.1", default-features = false }
 clap.workspace = true
+hex = "0.4"
+mimalloc = { version = "0.1", default-features = false }
 serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"
 tokio.workspace = true
 toml.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
-[build-dependencies]
-sha2 = "0.10"
-toml.workspace = true
+[dev-dependencies]
+tempfile = "3"

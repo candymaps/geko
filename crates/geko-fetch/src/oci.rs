@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Duration;
 
-use geko_core::{GekoError, Result};
+use geko_module_sdk::{GekoError, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
