@@ -1,0 +1,47 @@
+[package]
+name = "geko-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "geko"
+path = "src/main.rs"
+
+[features]
+default = ["geocoder", "tiles", "source-osm", "source-overture", "source-ogc-features", "geocode-fst", "reverse-rstar"]
+geocode-fst = ["dep:geocode-fst"]
+reverse-rstar = ["dep:reverse-rstar"]
+geocoder = ["dep:geko-module-geocoder"]
+tiles = ["dep:geko-module-tiles"]
+source-osm = ["dep:source-osm"]
+source-overture = ["dep:source-overture"]
+source-ogc-features = ["dep:source-ogc-features"]
+
+[dependencies]
+geko-core.workspace = true
+geko-server.workspace = true
+geko-build.workspace = true
+geko-fetch.workspace = true
+geko-geom.workspace = true
+geko-module-geocoder = { workspace = true, optional = true }
+geko-module-tiles = { workspace = true, optional = true }
+source-osm = { workspace = true, optional = true }
+source-overture = { workspace = true, optional = true }
+source-ogc-features = { workspace = true, optional = true }
+geko-country-pack.workspace = true
+geocode-fst = { workspace = true, optional = true }
+reverse-rstar = { workspace = true, optional = true }
+serde_json.workspace = true
+anyhow.workspace = true
+mimalloc = { version = "0.1", default-features = false }
+clap.workspace = true
+serde.workspace = true
+tokio.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[build-dependencies]
+sha2 = "0.10"
+toml.workspace = true

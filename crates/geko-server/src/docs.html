@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>geko API</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
+  <style>
+    body { margin: 0; }
+    #bar { display: flex; justify-content: flex-end; padding: 10px 16px; border-bottom: 1px solid #eee;
+           font: 600 15px system-ui, sans-serif; }
+    #bar a { color: #222; text-decoration: none; padding: 6px 12px; border-radius: 6px; }
+    #bar a:hover { background: #f3f3f3; }
+  </style>
+</head>
+<body>
+  <!-- The demo is the geocoder's: shown only when that module is active. -->
+  <nav id="bar" hidden><a href="/">← Demo</a></nav>
+  <div id="swagger-ui"></div>
+  <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script>
+    SwaggerUIBundle({ url: "/openapi.yaml", dom_id: "#swagger-ui" });
+    fetch("/health").then(r => r.json()).then(h => {
+      if ((h.modules || []).includes("geocoder")) document.getElementById("bar").hidden = false;
+    }).catch(() => {});
+  </script>
+</body>
+</html>
