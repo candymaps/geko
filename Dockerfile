@@ -25,7 +25,7 @@ COPY --from=build /out/geko /geko
 
 FROM debian:bookworm-slim
 # Links the image to its repository in GitHub's registry.
-LABEL org.opencontainers.image.source=https://github.com/edgaza/geko
+LABEL org.opencontainers.image.source=https://github.com/candymaps/geko
 LABEL org.opencontainers.image.description="geko: geocoder with OSM and official national sources"
 # ca-certificates for the mirrors and buckets that are not reached through the certificates
 # compiled into the binary; curl for the health check.

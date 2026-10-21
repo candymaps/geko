@@ -19,7 +19,7 @@ const TITLE: &str = "org.opencontainers.image.title";
 /// No file of an artifact may be larger: a country pack is a few megabytes.
 const MAX_BLOB: u64 = 256 << 20;
 
-/// `<host>/<repository>:<tag>`, e.g. `ghcr.io/edgaza/geko/countries/es:format-1`.
+/// `<host>/<repository>:<tag>`, e.g. `ghcr.io/candymaps/geko/countries/es:format-1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub host: String,
@@ -252,14 +252,14 @@ mod tests {
                 let url = request.url().to_owned();
                 let authorized = request.headers().iter().any(|h| h.field.equiv("Authorization") && h.value.as_str() == "Bearer t0k");
                 let response = if url.starts_with("/token") {
-                    assert!(url.contains("scope=repository%3Aedgaza%2Fgeko%2Fcountries%2Fes%3Apull"), "{url}");
+                    assert!(url.contains("scope=repository%3Acandymaps%2Fgeko%2Fcountries%2Fes%3Apull"), "{url}");
                     Response::from_string(r#"{"token":"t0k"}"#)
                 } else if !authorized {
-                    let challenge = format!(r#"Bearer realm="{realm}",service="test",scope="repository:edgaza/geko/countries/es:pull""#);
+                    let challenge = format!(r#"Bearer realm="{realm}",service="test",scope="repository:candymaps/geko/countries/es:pull""#);
                     Response::from_string("").with_status_code(401).with_header(Header::from_bytes("WWW-Authenticate", challenge).unwrap())
-                } else if url == "/v2/edgaza/geko/countries/es/manifests/format-1" {
+                } else if url == "/v2/candymaps/geko/countries/es/manifests/format-1" {
                     Response::from_string(manifest.clone())
-                } else if let Some(d) = url.strip_prefix("/v2/edgaza/geko/countries/es/blobs/") {
+                } else if let Some(d) = url.strip_prefix("/v2/candymaps/geko/countries/es/blobs/") {
                     Response::from_data(blobs[d].clone())
                 } else {
                     Response::from_string("").with_status_code(404)
@@ -272,10 +272,10 @@ mod tests {
 
     #[test]
     fn parses_references() {
-        let r = Reference::parse("ghcr.io/edgaza/geko/countries/es:format-1").unwrap();
-        assert_eq!((r.host.as_str(), r.repository.as_str(), r.tag.as_str()), ("ghcr.io", "edgaza/geko/countries/es", "format-1"));
-        assert_eq!(r.to_string(), "ghcr.io/edgaza/geko/countries/es:format-1");
-        assert!(Reference::parse("ghcr.io/edgaza/geko").is_err());
+        let r = Reference::parse("ghcr.io/candymaps/geko/countries/es:format-1").unwrap();
+        assert_eq!((r.host.as_str(), r.repository.as_str(), r.tag.as_str()), ("ghcr.io", "candymaps/geko/countries/es", "format-1"));
+        assert_eq!(r.to_string(), "ghcr.io/candymaps/geko/countries/es:format-1");
+        assert!(Reference::parse("ghcr.io/candymaps/geko").is_err());
         assert!(Reference::parse("es:1").is_err());
     }
 
@@ -292,19 +292,19 @@ mod tests {
         let files: [(&str, &[u8]); 2] = [("pack.toml", b"country = \"ES\""), ("data/words.toml", b"connectors = []")];
         let host = registry(&files, false);
         let client = OciClient::new();
-        let reference = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-1")).unwrap();
+        let reference = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-1")).unwrap();
         let artifact = client.pull(&reference).unwrap().unwrap();
         assert_eq!(artifact.files, files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect::<Vec<_>>());
         assert_eq!(client.digest(&reference).unwrap().as_deref(), Some(artifact.digest.as_str()));
 
-        let missing = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-9")).unwrap();
+        let missing = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-9")).unwrap();
         assert_eq!(client.pull(&missing).unwrap(), None);
     }
 
     #[test]
     fn rejects_a_file_that_does_not_match_its_digest() {
         let host = registry(&[("pack.toml", b"country = \"ES\"")], true);
-        let reference = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-1")).unwrap();
+        let reference = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-1")).unwrap();
         let err = OciClient::new().pull(&reference).unwrap_err();
         assert!(err.to_string().contains("not sha256:"), "{err}");
     }
