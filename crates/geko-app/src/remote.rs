@@ -178,7 +178,6 @@ pub mod tests {
                 version: "1.0.0".into(),
                 contract: CONTRACT,
                 routes: vec![Route { method: Method::Post, path: "v1/echo".into(), pool: true, public: false }],
-                home: None,
                 openapi: None,
                 attribution: None,
                 commands: vec![],

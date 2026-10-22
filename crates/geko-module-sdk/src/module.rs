@@ -117,8 +117,6 @@ pub struct Description {
     pub version: String,
     pub contract: u32,
     pub routes: Vec<Route>,
-    /// The route (of `routes`) that `/` leads to, if the module has a page to show there.
-    pub home: Option<String>,
     /// The route (of `routes`) of the reference of its API, which `/docs` lists.
     pub openapi: Option<String>,
     /// What the module adds to `/v1/attribution`, under its name.

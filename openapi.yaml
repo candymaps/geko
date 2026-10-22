@@ -16,10 +16,12 @@ servers:
 paths:
   /:
     get:
-      summary: Leads to the page of the first active module that has one (the demo of the geocoder).
+      summary: A demo page, with a map, of what the active modules offer (the search of the geocoder). Never needs an API key.
       responses:
-        "303":
-          description: Where the page is.
+        "200":
+          description: An HTML page that loads Leaflet from unpkg.com.
+          content:
+            text/html: {}
   /v1/attribution:
     get:
       summary: Licenses and attributions of the served data, and what each module adds (the derivative database notice of the geocoder, ODbL 4.6). Never needs an API key.

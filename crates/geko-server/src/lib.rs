@@ -223,6 +223,8 @@ impl BundleManager {
 /// those of the modules.
 const OPENAPI: &str = include_str!("../../../openapi.yaml");
 const DOCS: &str = include_str!("docs.html");
+/// `/`: a map with what the active modules offer (the geocoder's search), through their API.
+const DEMO: &str = include_str!("demo.html");
 
 /// Licenses and attributions of the served data (PROJECT.md §6.4): the sources of the bundle, whom
 /// to ask for the code that reproduces it, and what each module adds under its name.
@@ -245,8 +247,7 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
 fn docs(modules: &[Mounted]) -> String {
     let mut specs = vec![json!({ "url": "/openapi.yaml", "name": "geko" })];
     specs.extend(modules.iter().filter_map(|m| m.description.openapi.as_ref().map(|p| json!({ "url": m.path(p), "name": m.name() }))));
-    let home = modules.iter().any(|m| m.description.home.is_some());
-    DOCS.replace("__SPECS__", &serde_json::Value::from(specs).to_string()).replace("__HOME__", if home { "true" } else { "false" })
+    DOCS.replace("__SPECS__", &serde_json::Value::from(specs).to_string())
 }
 
 /// Runs the CPU-bound work of a request (parsing, search) on the blocking pool, so the async
@@ -323,9 +324,6 @@ fn module_routes(modules: &[Mounted]) -> Router {
             }
         }
     }
-    if let Some(home) = modules.iter().find_map(|m| m.description.home.as_ref().map(|h| m.path(h))) {
-        app = app.route("/", get(move || async move { Redirect::to(&home) }));
-    }
     app
 }
 
@@ -355,7 +353,8 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             }),
         )
         .route("/openapi.yaml", get(|| async { ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
-        .route("/docs", get(move || async move { axum::response::Html(docs) }));
+        .route("/docs", get(move || async move { axum::response::Html(docs) }))
+        .route("/", get(|| async { axum::response::Html(DEMO) }));
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
         let bundles = bundles.clone();
@@ -469,7 +468,6 @@ mod tests {
                     route(Method::Get, "v1/echo/{id}", true, false),
                     route(Method::Post, "v1/body", false, false),
                 ],
-                home: Some(String::new()),
                 openapi: Some("openapi.yaml".into()),
                 attribution: Some(json!({ "notice": "fake data" })),
                 commands: vec![],
@@ -514,7 +512,8 @@ mod tests {
         assert_eq!(get_json(&app, "/v1/echo/x").await.0, StatusCode::NOT_FOUND, "only under its name");
 
         let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
-        assert_eq!(res.headers()[header::LOCATION], "/fake/");
+        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
+        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/"), "the demo of the host");
         let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.headers()[header::LOCATION], "/fake/");
     }
@@ -530,7 +529,7 @@ mod tests {
         assert!(to_bytes(res.into_body(), 1 << 20).await.unwrap().starts_with(b"openapi: 3.1"));
         let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
+        assert!(page.starts_with("<!doctype html>") && page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
     }
 
     #[tokio::test]

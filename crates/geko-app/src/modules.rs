@@ -269,7 +269,6 @@ mod tests {
                 version: "1".into(),
                 contract: self.1,
                 routes: vec![],
-                home: None,
                 openapi: None,
                 attribution: None,
                 commands: vec![],

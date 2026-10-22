@@ -1,8 +1,4 @@
-    // The reference of geko and those of the active modules, filled in by the server.
-    const specs = __SPECS__;
-    SwaggerUIBundle({ urls: specs, "urls.primaryName": specs.length > 1 ? specs[1].name : specs[0].name, dom_id: "#swagger-ui",
-                      layout: "StandaloneLayout", presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset] });
-    document.getElementById("bar").hidden = !__HOME__;<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -18,8 +14,7 @@
   </style>
 </head>
 <body>
-  <!-- The page of a module (the demo of the geocoder), shown when one is active. -->
-  <nav id="bar" hidden><a href="/">← Demo</a></nav>
+  <nav id="bar"><a href="/">← Demo</a></nav>
   <div id="swagger-ui"></div>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
@@ -31,7 +26,6 @@
       urls: specs, "urls.primaryName": specs[Math.min(1, specs.length - 1)].name, dom_id: "#swagger-ui",
       layout: "StandaloneLayout", presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
     });
-    document.getElementById("bar").hidden = !__HOME__;
   </script>
 </body>
 </html>
