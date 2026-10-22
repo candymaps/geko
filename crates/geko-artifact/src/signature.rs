@@ -30,6 +30,14 @@ pub struct Kind {
     pub name: &'static str,
 }
 
+/// A package of a module (docs/MODULES_PLAN.md): code that the host runs, so never without it.
+pub const MODULE: Kind = Kind { domain: "geko-module", format: 1, name: "module" };
+
+/// The platform of this binary, as modules are published for it (`linux-x86_64`).
+pub fn platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Signature {

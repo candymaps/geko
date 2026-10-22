@@ -14,8 +14,9 @@ use geko_module_sdk::{GekoError, Result};
 use crate::config::Config;
 use crate::store::{Kind, Package, Store, default_registry};
 
-/// The version of the modules linked in: that of the workspace, as every crate of it.
-pub const LINKED_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The version of the modules linked in: that of the workspace, as every crate of it, compiled with
+/// the same `GEKO_MODULE_VERSION`.
+pub const LINKED_VERSION: &str = geko_module_sdk::module_version!();
 
 /// The modules linked into this binary, by name.
 pub fn linked() -> Vec<(&'static str, Open)> {

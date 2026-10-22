@@ -11,24 +11,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use geko_artifact::registry::{self, digest_of, partial_of, pull_verified, replace};
-use geko_artifact::signature::{self, Kind as Signed};
+use geko_artifact::signature::{self, MODULE, platform};
 use geko_fetch::oci::{OciClient, Reference};
 use geko_module_sdk::module::{CONTRACT, ModuleName};
 use geko_module_sdk::{GekoError, Result};
 use serde::Deserialize;
 
-/// The signature of a module, which no other artifact passes for.
-pub const MODULE: Signed = Signed { domain: "geko-module", format: 1, name: "module" };
-
-/// The annotations of the manifest of a published module.
+/// The annotations of the manifest of a published module (ci/modules.sh).
 pub const VERSION: &str = "geko.version";
 pub const CONTRACT_KEY: &str = "geko.contract";
 pub const PLATFORM: &str = "geko.platform";
-
-/// The platform of this binary, as modules are published for it (`linux-x86_64`).
-pub fn platform() -> String {
-    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
-}
 
 pub fn default_registry(module: &ModuleName) -> String {
     format!("ghcr.io/candymaps/geko-{module}")

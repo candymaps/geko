@@ -21,6 +21,19 @@ use crate::{GekoError, Result};
 /// it implements, and is refused by a host that does not speak it.
 pub const CONTRACT: u32 = 1;
 
+/// The version a module says it is (`Description::version`): that of its crate, or
+/// `GEKO_MODULE_VERSION` when it is compiled to be published (`ci/modules.sh`: `<version>-<commit>`,
+/// or `<version>` in a release), the version of its package in the registry.
+#[macro_export]
+macro_rules! module_version {
+    () => {
+        match option_env!("GEKO_MODULE_VERSION") {
+            Some(version) => version,
+            None => env!("CARGO_PKG_VERSION"),
+        }
+    };
+}
+
 /// The name of a module: lowercase ASCII letters, digits and hyphens, starting with a letter. It
 /// names its section of `geko.toml`, its file of configuration and the prefix of its routes.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

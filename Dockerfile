@@ -6,6 +6,9 @@
 #   docker build -t geko .
 #   docker run -p 8080:8080 -v geko-data:/var/lib/geko -v ./geko.toml:/etc/geko/geko.toml geko
 #
+# geko comes alone, without modules: it downloads those of [modules] into /var/lib/geko/modules
+# (the newest of its contract, or the fixed version), signed (docs/MODULES_PLAN.md).
+#
 # The default command is `up`: serve at once (503 until the first bundle is published) while it
 # downloads and builds what the configuration asks for, and build again every [data] max_age_days,
 # without a restart. `serve` only serves what is already in /var/lib/geko or, with `[serve] bundles_url`, what another
@@ -16,7 +19,7 @@ WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p geko-app && mkdir /out && cp target/release/geko /out/geko
+    cargo build --release --locked -p geko-app --no-default-features && mkdir /out && cp target/release/geko /out/geko
 
 # The binary alone. `make image` replaces this stage with the last local build
 # (`--build-context binary=…`), and the compile stage is then skipped.
