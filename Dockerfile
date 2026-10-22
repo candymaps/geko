@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     for m in $(echo "$MODULES" | tr ',' ' '); do \
       [ -f /modules/$m/Cargo.toml ] || { echo "module $m: its repository is not the build context $m (develop/compose.yaml)" >&2; exit 1; }; \
       rm -rf /work/$m && cp -r /modules/$m /work/$m && cd /work/$m; \
-      sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
+      sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko\(\.git\)\{0,1\}"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
       package=$(find . -name module.toml -not -path './target/*' | head -1); \
       entry=$(sed -n 's/^entry *= *"\(.*\)"/\1/p' "$package"); \
       cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
