@@ -226,7 +226,7 @@ const DOCS: &str = include_str!("docs.html");
 /// `/`: a map with what the active modules offer (the geocoder's search), through their API.
 const DEMO: &str = include_str!("demo.html");
 
-/// Licenses and attributions of the served data (PROJECT.md §6.4): the sources of the bundle, whom
+/// Licenses and attributions of the served data (PROJECT.md §6): the sources of the bundle, whom
 /// to ask for the code that reproduces it, and what each module adds under its name.
 fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Option<&str>) -> serde_json::Value {
     let licenses = bundles.map(|b| b.licenses()).unwrap_or_default();

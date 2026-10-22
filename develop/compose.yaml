@@ -4,13 +4,15 @@
 #   GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose.yaml up --build
 #
 # The image (target `local` of the Dockerfile) carries geko and the modules of GEKO_DEV_MODULES,
-# built inside Docker on the Debian of the published image, and never downloads a module: one
-# active in the configuration but not built in is an error. The country packs are those of the
-# repository, never downloaded either. Everything is grouped under the project geko-dev.
+# built inside Docker on the Debian of the published image from their repositories, beside this one
+# (geko-<module>), against the SDK of this tree, and never downloads a module: one active in the
+# configuration but not built in is an error. The country packs are those of the repository of the
+# geocoder, never downloaded either. Everything is grouped under the project geko-dev.
 #
 #   GEKO_DEV_CONFIG    the geko.toml (default: develop/geko.toml, the sample of the image, which
 #                      does not accept the licences: use your own, outside the repository)
 #   GEKO_DEV_MODULES   the modules to build, comma-separated (default: geocoder)
+#   GEKO_DEV_MODULES_DIR  where their repositories are (default: the folder of this one)
 #   GEKO_DEV_VERSION   the version the modules say they are, in the bundles they build
 #                      (make start-dev: <version>-<commit>[-dirty])
 #   GEKO_DEV_PORT      the port on this machine (default: 8080)
@@ -21,6 +23,9 @@ services:
     build:
       context: ..
       target: local
+      additional_contexts:
+        geocoder: ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder
+        tiles: ${GEKO_DEV_MODULES_DIR:-../..}/geko-tiles
       args:
         MODULES: ${GEKO_DEV_MODULES:-geocoder}
         GEKO_MODULE_VERSION: ${GEKO_DEV_VERSION:-}
@@ -30,7 +35,7 @@ services:
     volumes:
       - data:/var/lib/geko
       - ${GEKO_DEV_CONFIG:-./geko.toml}:/etc/geko/geko.toml:ro
-      - ../countries:/packs:ro
+      - ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder/countries:/packs:ro
     environment:
       GEKO_PACKS: /packs
 

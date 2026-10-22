@@ -1,4 +1,4 @@
-//! Publication of immutable, versioned bundles (PROJECT.md §12).
+//! Publication of immutable, versioned bundles (PROJECT.md §11).
 
 use std::fs::{self, File};
 use std::io::{BufReader, Read};
@@ -123,7 +123,7 @@ pub fn publish(bundles: &Path, parts: &[BundlePart], modules: Vec<BundleModule>,
 
 pub enum Published {
     New(BundleManifest),
-    /// Nothing changed since the current version was published (PROJECT.md §8.3).
+    /// Nothing changed since the current version was published (PROJECT.md §8).
     UpToDate(String),
 }
 
@@ -185,7 +185,7 @@ fn prune(bundles: &Path, keep: usize) -> Result<()> {
 
 /// Brings the current version published at `remote` (an HTTP mirror of a bundles directory)
 /// into `bundles`, downloading only the artifacts whose hash changed and hard-linking the others
-/// from the local current version (PROJECT.md §12). Each download is checked against its hash,
+/// from the local current version (PROJECT.md §11). Each download is checked against its hash,
 /// and the new version only becomes current once complete. Returns the version pulled, or `None`
 /// when the local copy is already current.
 pub fn pull(remote: &str, bundles: &Path, downloader: &dyn Downloader, keep: usize) -> Result<Option<String>> {

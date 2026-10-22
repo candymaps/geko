@@ -20,8 +20,8 @@
 
 A modular, multi-country geospatial engine. Each service is a module, enabled in `geko.toml`, on top of the same data:
 
-- **Geocoding** (available, [modules/geko-geocoder](modules/geko-geocoder/README.md)): turns addresses and place names into coordinates (search and autocomplete), and coordinates into addresses (reverse).
-- **Vector tiles, routing…** (planned): new modules that plug in without changing the others.
+- **Geocoding** (available, [geko-geocoder](https://github.com/candymaps/geko-geocoder)): turns addresses and place names into coordinates (search and autocomplete), and coordinates into addresses (reverse).
+- **Vector tiles** ([geko-tiles](https://github.com/candymaps/geko-tiles), a skeleton for now), **routing…** (planned): new modules that plug in without changing the others.
 
 They all share the same foundation:
 
@@ -30,7 +30,7 @@ They all share the same foundation:
 - **Fast and lightweight:** written in Rust, with its own indexes. Geocoding answers in milliseconds and serves all of Spain with less than 1 GB of memory.
 - **A new country is a data pack**, with no changes to the engine.
 
-The full specification is in [PROJECT.md](docs/PROJECT.md) (in Spanish).
+This repository is the host: the `geko` binary, which downloads the modules, builds and reloads their bundles and serves what they share. Each module lives in its own repository. The specification of the host is in [PROJECT.md](docs/PROJECT.md), and the contract of the modules in [MODULES_PLAN.md](docs/MODULES_PLAN.md) (both in Spanish).
 
 ## Installation and usage
 
@@ -50,7 +50,7 @@ country = "ES"            # ISO 3166-1; one [[scope]] per country (LU…)
 accept_licenses = true    # you accept the licenses of the sources: ODbL (OSM), CDLA (Overture), CC BY (CartoCiudad)
 ```
 
-Every section and option of geko itself is in [Configuration reference](#configuration-reference-gekotoml), below, with its default value and what it does. Each module has its own file beside it, `geko-<module>.toml`, documented in the README of the module: the geocoder's (its sources, time budgets, cache…) in [modules/geko-geocoder](modules/geko-geocoder/README.md#configuration-geko-geocodertoml). Without it, a module takes its defaults.
+Every section and option of geko itself is in [Configuration reference](#configuration-reference-gekotoml), below, with its default value and what it does. Each module has its own file beside it, `geko-<module>.toml`, documented in the README of the module: the geocoder's (its sources, time budgets, cache…) in [geko-geocoder](https://github.com/candymaps/geko-geocoder#configuration-geko-geocodertoml). Without it, a module takes its defaults.
 
 The image carries no configuration: without a mounted `geko.toml`, it stops right away asking for one. Inside the container, geko always listens on `0.0.0.0:8080`, whatever `[serve] listen` says.
 
@@ -65,13 +65,13 @@ To change the options of a module, mount its file too, beside it (`-v "$PWD/geko
 
 The first time, it downloads the data for those countries, builds the indexes and serves them (it answers 503 until then): about 2 minutes for Luxembourg, around an hour for all of Spain (about 8 GB of disk while building and 5 GB afterwards, and 3 GB of memory). Follow it with `docker logs -f geko`: while it builds, one line every 2 seconds with how far it has gone (with `GEKO_VERBOSE=1`, `-e GEKO_VERBOSE=1` in Docker, or `geko --verbose`, every step instead). Later starts reuse the `geko-data` volume and only rebuild what changed.
 
-**3. Use it.** The demo page, a map with the search of the geocoder, is at <http://localhost:8080/>. Each module serves its routes under its name: the geocoder under `/geocoder/`, with its API in [its README](modules/geko-geocoder/README.md#usage). Common to all of them: `/health`, `/metrics`, the licenses and attribution of the served data at `/v1/attribution`, and the API of the host and of every active module, browsable with Swagger UI, at `/docs` (the host's, [openapi.yaml](openapi.yaml), also at `/openapi.yaml`).
+**3. Use it.** The demo page, a map with the search of the geocoder, is at <http://localhost:8080/>. Each module serves its routes under its name: the geocoder under `/geocoder/`, with its API in [its README](https://github.com/candymaps/geko-geocoder#usage). Common to all of them: `/health`, `/metrics`, the licenses and attribution of the served data at `/v1/attribution`, and the API of the host and of every active module, browsable with Swagger UI, at `/docs` (the host's, [openapi.yaml](openapi.yaml), also at `/openapi.yaml`).
 
 To update: `docker pull ghcr.io/candymaps/geko`, remove the container and start it again with the same command; the data stays in the volume.
 
 ## Configuration reference (`geko.toml`)
 
-Every section and option of geko itself (the host), with its default value unless a comment says otherwise. geko reads `/etc/geko/geko.toml` (or `GEKO_CONFIG`), and each module its `geko-<module>.toml` beside it: the geocoder's options are in [modules/geko-geocoder](modules/geko-geocoder/README.md#configuration-geko-geocodertoml).
+Every section and option of geko itself (the host), with its default value unless a comment says otherwise. geko reads `/etc/geko/geko.toml` (or `GEKO_CONFIG`), and each module its `geko-<module>.toml` beside it: the geocoder's options are in [geko-geocoder](https://github.com/candymaps/geko-geocoder#configuration-geko-geocodertoml).
 
 ```toml
 # Every module, enabled or not (`true`, `false`, or a table with `enabled` and `config`, the file
@@ -81,7 +81,7 @@ Every section and option of geko itself (the host), with its default value unles
 # built the bundle it serves, and downloads it if missing.
 [modules]
 geocoder = true
-tiles    = true                     # still a skeleton: it serves nothing yet
+tiles    = false                    # still a skeleton: it serves nothing yet
 
 # [modules.geocoder]                # instead of `geocoder = true` above
 # version  = "1.4.2"                # default: the newest of the contract of this geko
@@ -89,7 +89,7 @@ tiles    = true                     # still a skeleton: it serves nothing yet
 
 [[scope]]                           # one per country; no default
 country = "ES"                      # ISO 3166-1
-regions = ["ES-PM"]                 # ISO 3166-2, from the regions of the country pack; empty: the whole country
+regions = ["ES-PM"]                 # ISO 3166-2, as the modules know them (the geocoder: from its country packs); empty: the whole country
 
 [data]
 refresh            = "if-changed"   # never | if-changed | always
@@ -127,19 +127,21 @@ Read the full terms in [LICENSE](LICENSE).
 
 | Technology | What it is used for |
 |---|---|
-| **Rust** (2024 edition) | The whole engine: download, build, merge, indexes and serving |
+| **Rust** (2024 edition) | The host: configuration, download, modules, bundles and serving |
 | `clap` | Command line: `geko plan`, `fetch`, `build`, `serve`, `up`, `purge` and the commands of each module (`geko geocoder query`…) |
 | `serde`, `serde_json`, `toml` | Configuration (`geko.toml`), bundle manifest, JSON responses |
 | `thiserror`, `anyhow` | Typed errors in the libraries and errors with context in the binary |
 | `tracing`, `tracing-subscriber` | Activity logging (downloads, timing of each phase, reloads) |
-| `mimalloc` | Memory allocator. With glibc's, reading OSM spent 32 s in system calls |
+| `mimalloc` | Memory allocator; each module declares its own as well |
 
 ### Data download
 
 | Technology | What it is used for |
 |---|---|
 | `ureq` (with `rustls`) | Synchronous HTTP client with pure-Rust TLS: downloads with resume, ETag and retries |
-| `sha2`, `md-5`, `hex` | Checksums: md5 of the Geofabrik extracts, sha256 of downloads and bundle artifacts |
+| `sha2`, `hex` | Checksums of downloads and bundle artifacts |
+| `ed25519-dalek` | Signatures of the modules and data packages that geko downloads |
+| `libloading` | Modules loaded as libraries (`kind = "dylib"`) |
 
 ### HTTP service
 
@@ -156,16 +158,5 @@ Read the full terms in [LICENSE](LICENSE).
 | WSL Debian | Build and run environment (Linux, as in production) |
 | `cargo`, `clippy`, `rustfmt` | Building, static analysis and formatting |
 | `tempfile`, `tiny_http` | Tests: temporary directories and a fake HTTP server for the downloader |
-| DuckDB (CLI) | Inspecting and validating the staging and canonical Parquet files |
-| `geko-eval` (own) | Generating reference queries from the canonical data and evaluating geko over HTTP (top-1 and top-5 accuracy, MRR, latency); comparing with a baseline and failing if anything gets worse |
-| `geko-conformance` (own) | Conformance suites for each port, which every provider runs from its tests |
+| Conformance suites (own, `geko-module-sdk`) | The contract of a module, which every module runs from its tests, and the downloader |
 | `ci/test.sh` (own) | The checks, the same locally and in CI (GitHub Actions) |
-
-### Planned modules and tooling ([PROJECT.md](docs/PROJECT.md), §15)
-
-| Technology | What it will be used for |
-|---|---|
-| Planetiler (Java) | Tiles module: generating the vector tiles |
-| PMTiles | Tiles module: tile format, served with HTTP range requests |
-| To be decided | Routing module: route calculation on the OSM road network, in the style of OSRM |
-| `criterion`, `oha` | Internal benchmarks and HTTP load tests (throughput at the target latency) |

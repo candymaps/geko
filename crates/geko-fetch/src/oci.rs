@@ -1,5 +1,5 @@
 //! Pull of an OCI artifact, such as a country pack, from a registry such as ghcr.io (PROJECT.md
-//! §2.4), with the distribution API: an anonymous token when the registry asks for one, the
+//! §7.2), with the distribution API: an anonymous token when the registry asks for one, the
 //! manifest, then each layer, checked against its digest. Each layer is a file, named by its
 //! `org.opencontainers.image.title` annotation, as `oras push` leaves them.
 

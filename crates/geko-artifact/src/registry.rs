@@ -1,4 +1,4 @@
-//! Download of signed artifacts from the registry where they are published (PROJECT.md §2.4): the
+//! Download of signed artifacts from the registry where they are published (PROJECT.md §7.1): the
 //! country packs of the geocoder and the modules of the host. Each one is downloaded into a folder of
 //! its own, checked against its signature before it replaces the previous copy, and kept with the
 //! digest of its manifest (`.digest`), so that it is downloaded again only when it changes.

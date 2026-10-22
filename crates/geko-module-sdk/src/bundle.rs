@@ -1,4 +1,4 @@
-//! Bundle manifest (PROJECT.md §12): what a published, immutable bundle contains. The host
+//! Bundle manifest (PROJECT.md §11): what a published, immutable bundle contains. The host
 //! publishes it from what every module built; each module keeps in its own entry (`meta`) what
 //! it needs to load its part, which the host never reads.
 

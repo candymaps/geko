@@ -1,4 +1,4 @@
-//! Incremental generation (PROJECT.md §8.3). Each stage writes one output directory and, once it
+//! Incremental generation (PROJECT.md §8). Each stage writes one output directory and, once it
 //! succeeds, a stamp beside it (`<dir>.stamp.json`) with:
 //!
 //! - `key`: hash of the stage's code version and inputs. Raw downloads are fingerprinted by path,

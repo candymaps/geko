@@ -1,5 +1,5 @@
-# geko in a container: the binary and a sample configuration, and no country pack: geko downloads
-# those of its scope (PROJECT.md §2.4). Mount your own geko.toml at
+# geko in a container: the binary, with no configuration and no module: geko downloads the modules
+# of its configuration and they download their data (PROJECT.md §7.1). Mount your own geko.toml at
 # /etc/geko/geko.toml and a volume at /var/lib/geko, where the downloads, the work files and the
 # published bundles live:
 #
@@ -15,19 +15,25 @@
 # machine published.
 #
 # The target `local` (develop/compose.yaml, `make start-dev`) is for development instead: geko and the
-# modules of MODULES, built from this same tree, in the image, so that it never downloads one.
+# modules of MODULES, built from their repositories (the build contexts `geocoder` and `tiles`)
+# against the SDK of this tree, in the image, so that it never downloads one.
 
 FROM rust:1.99.0-bookworm AS build
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
-    cargo build --release --locked -p geko-app --no-default-features && mkdir /out && cp target/release/geko /out/geko
+    cargo build --release --locked -p geko-app && mkdir /out && cp target/release/geko /out/geko
 
 # The binary alone. `make image` replaces this stage with the last local build
 # (`--build-context binary=…`), and the compile stage is then skipped.
 FROM scratch AS binary
 COPY --from=build /out/geko /geko
+
+# The repositories of the modules, given as build contexts of the same name (develop/compose.yaml);
+# empty without them.
+FROM scratch AS geocoder
+FROM scratch AS tiles
 
 # geko and the modules of MODULES (comma-separated), each as a process of its own, as
 # GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
@@ -39,20 +45,26 @@ ARG GEKO_MODULE_VERSION=
 ARG PROFILE=ci
 WORKDIR /src
 COPY . .
-# An empty GEKO_MODULE_VERSION is unset: empty, it would be the version of the modules.
+# An empty GEKO_MODULE_VERSION is unset: empty, it would be the version of the modules. Each module
+# takes the SDK, geko-fetch and geko-artifact from this tree instead of its git dependency on the
+# repository of the host, which is private and may not have them yet.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,id=geko-target-local,target=/src/target \
+    --mount=type=bind,from=geocoder,target=/modules/geocoder \
+    --mount=type=bind,from=tiles,target=/modules/tiles \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
-    modules=$(echo "$MODULES" | tr ',' ' '); \
-    packages=; for m in $modules; do packages="$packages -p geko-module-$m --bin geko-$m"; done; \
-    # Apart: --no-default-features applies to every package of the command, and would leave the
-    # modules without their own (the geocoder, without its sources).
-    cargo build --profile $PROFILE --locked -p geko-app --no-default-features --bin geko; \
-    cargo build --profile $PROFILE --locked $packages; \
-    mkdir -p /out/modules; cp target/$PROFILE/geko /out/geko; \
-    for m in $modules; do \
-      mkdir /out/modules/$m; cp target/$PROFILE/geko-$m modules/geko-$m/module.toml /out/modules/$m/; \
+    cargo build --profile $PROFILE --locked -p geko-app --bin geko; \
+    mkdir -p /out/modules /work; cp target/$PROFILE/geko /out/geko; \
+    for m in $(echo "$MODULES" | tr ',' ' '); do \
+      [ -f /modules/$m/Cargo.toml ] || { echo "module $m: its repository is not the build context $m (develop/compose.yaml)" >&2; exit 1; }; \
+      rm -rf /work/$m && cp -r /modules/$m /work/$m && cd /work/$m; \
+      sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
+      cargo build --profile $PROFILE --bin geko-$m --target-dir /src/target/modules; \
+      mkdir /out/modules/$m; cp /src/target/modules/$PROFILE/geko-$m /out/modules/$m/; \
+      cp "$(find . -name module.toml -not -path './target/*' | head -1)" /out/modules/$m/; \
+      cd /src; \
     done
 
 FROM debian:bookworm-slim AS base

@@ -26,7 +26,7 @@ pub const REPORT: &str = "build_report.json";
 struct BundleSize {
     version: String,
     bytes: u64,
-    /// Files under a `hot/` directory: the part pinned in memory (PROJECT.md §9.6).
+    /// Files under a `hot/` directory: the part pinned in memory (PROJECT.md §9).
     hot_bytes: u64,
 }
 

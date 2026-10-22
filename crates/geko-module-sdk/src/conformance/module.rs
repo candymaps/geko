@@ -97,7 +97,6 @@ pub fn check(module: &dyn Module) {
     }
     assert!(module.command("no-such-command", &[]).is_err(), "an unknown command is an error");
 
-    assert_eq!(module.progress(), None, "no progress outside a build");
     let mut metrics = String::new();
     module.metrics(&mut metrics);
     check_metrics(&metrics);

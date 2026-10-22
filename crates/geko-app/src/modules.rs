@@ -1,6 +1,6 @@
 //! The modules of this binary and how the host opens them (docs/MODULES_PLAN.md). Each active module
 //! is, in this order: the package of `GEKO_MODULES` (never downloaded); the one linked in
-//! (`StaticModule`, behind its Cargo feature), unless `[modules.<module>] version` fixes another
+//! (`StaticModule`, by the binary that runs the host), unless `[modules.<module>] version` fixes another
 //! version; or the one downloaded from its registry (`store`), the newest of the contract of this
 //! geko or the version fixed, but never with `GEKO_MODULES`. A package runs as a process of its own (`ProcessModule`) or is loaded
 //! as a library (`DylibModule`), as its `module.toml` says.
@@ -14,18 +14,14 @@ use geko_module_sdk::{GekoError, Result};
 use crate::config::Config;
 use crate::store::{Kind, Package, Store, default_registry};
 
-/// The version of the modules linked in: that of the workspace, as every crate of it, compiled with
-/// the same `GEKO_MODULE_VERSION`.
-pub const LINKED_VERSION: &str = geko_module_sdk::module_version!();
-
-/// The modules linked into this binary, by name.
-pub fn linked() -> Vec<(&'static str, Open)> {
-    vec![
-        #[cfg(feature = "geocoder")]
-        (geko_module_geocoder::NAME, geko_module_geocoder::open as Open),
-        #[cfg(feature = "tiles")]
-        (geko_module_tiles::NAME, geko_module_tiles::open as Open),
-    ]
+/// A module linked into the binary that runs the host (`geko_app::main`): its name, its version
+/// (`geko_module_sdk::module_version!()` in the crate of the module, not in the host) and how it
+/// is opened.
+#[derive(Clone, Copy)]
+pub struct Linked {
+    pub name: &'static str,
+    pub version: &'static str,
+    pub open: Open,
 }
 
 /// A module of `GEKO_MODULES`: its package, in `<GEKO_MODULES>/<name>/`.
@@ -102,7 +98,7 @@ pub struct Opened {
 pub struct Opener {
     config: Config,
     geko_toml: PathBuf,
-    linked: Vec<(&'static str, Open)>,
+    linked: Vec<Linked>,
     local: Vec<Local>,
     store: Store,
     /// With `GEKO_MODULES`, a module neither in it nor linked in is an error, not a download: the
@@ -126,7 +122,7 @@ fn start(dir: &Path, package: &Package, context: Context) -> Result<Box<dyn Modu
 }
 
 impl Opener {
-    pub fn new(config: &Config, geko_toml: &Path, linked: Vec<(&'static str, Open)>, local: Vec<Local>) -> Self {
+    pub fn new(config: &Config, geko_toml: &Path, linked: Vec<Linked>, local: Vec<Local>) -> Self {
         let store = Store::new(&config.data.dir, config.data.offline);
         Self { config: config.clone(), geko_toml: geko_toml.to_owned(), linked, local, store, downloads: true }
     }
@@ -174,18 +170,20 @@ impl Opener {
             tracing::info!(module = %name, package = %local.dir.display(), "module of GEKO_MODULES");
             let module = start(&local.dir, &Package::read(&local.dir)?, self.context(name)?)?;
             Opened { module: Arc::from(module), origin: Origin::Local(local.dir.clone()) }
-        } else if let Some((_, open)) = self.linked.iter().find(|(n, _)| *n == name.as_str())
-            && fixed.is_none_or(|v| v == LINKED_VERSION)
+        } else if let Some(linked) = self.linked.iter().find(|l| l.name == name.as_str())
+            && fixed.is_none_or(|v| v == linked.version)
         {
-            Opened { module: Arc::from(open(self.context(name)?)?), origin: Origin::Linked }
+            Opened { module: Arc::from((linked.open)(self.context(name)?)?), origin: Origin::Linked }
         } else if !self.downloads {
             return Err(GekoError::Config(format!(
                 "module `{name}` is active, but it is neither in GEKO_MODULES nor linked in, and with GEKO_MODULES it is not downloaded: build it too (make start-dev: DEV_MODULES=…,{name}) or disable it in [modules]"
             )));
         } else {
             self.downloaded(name, fixed).map_err(|e| {
-                let linked = self.linked.iter().any(|(n, _)| *n == name.as_str());
-                let why = if linked { format!("version {} is fixed and the one linked in is {LINKED_VERSION}", fixed.unwrap_or("?")) } else { format!("it is not linked into this geko (feature `{name}`) nor in GEKO_MODULES") };
+                let why = match self.linked.iter().find(|l| l.name == name.as_str()) {
+                    Some(linked) => format!("version {} is fixed and the one linked in is {}", fixed.unwrap_or("?"), linked.version),
+                    None => "it is neither linked into this geko nor in GEKO_MODULES".to_owned(),
+                };
                 GekoError::Config(format!("module `{name}`: {why}, and it cannot be had from {}: {e}", self.registry(name)))
             })?
         };
@@ -276,7 +274,11 @@ mod tests {
         }
     }
 
-    fn opener(linked: Vec<(&'static str, Open)>, toml: &str, data: &Path) -> Opener {
+    fn geocoder(open: Open) -> Linked {
+        Linked { name: "geocoder", version: "1.0.0", open }
+    }
+
+    fn opener(linked: Vec<Linked>, toml: &str, data: &Path) -> Opener {
         let mut config = Config::parse(toml).unwrap();
         config.data.dir = data.to_owned();
         config.data.offline = true;
@@ -288,9 +290,9 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let other: Open = |_| Ok(Box::new(Named("geocoder", CONTRACT + 1)));
         let ok: Open = |_| Ok(Box::new(Named("geocoder", CONTRACT)));
-        let err = opener(vec![("geocoder", other)], "", data.path()).open(&name("geocoder")).err().unwrap();
+        let err = opener(vec![geocoder(other)], "", data.path()).open(&name("geocoder")).err().unwrap();
         assert!(err.to_string().contains("contract"), "{err}");
-        let opened = opener(vec![("geocoder", ok)], "", data.path()).open(&name("geocoder")).unwrap();
+        let opened = opener(vec![geocoder(ok)], "", data.path()).open(&name("geocoder")).unwrap();
         assert_eq!(opened.origin, Origin::Linked);
     }
 
@@ -298,20 +300,20 @@ mod tests {
     fn a_fixed_version_other_than_the_linked_one_is_downloaded() {
         let data = tempfile::tempdir().unwrap();
         let ok: Open = |_| Ok(Box::new(Named("geocoder", CONTRACT)));
-        let same = format!("[modules.geocoder]\nversion = \"{LINKED_VERSION}\"\n");
-        assert_eq!(opener(vec![("geocoder", ok)], &same, data.path()).open(&name("geocoder")).unwrap().origin, Origin::Linked);
+        let same = "[modules.geocoder]\nversion = \"1.0.0\"\n";
+        assert_eq!(opener(vec![geocoder(ok)], same, data.path()).open(&name("geocoder")).unwrap().origin, Origin::Linked);
         let other = "[modules.geocoder]\nversion = \"99.0.0\"\n";
-        let err = opener(vec![("geocoder", ok)], other, data.path()).open(&name("geocoder")).err().unwrap();
+        let err = opener(vec![geocoder(ok)], other, data.path()).open(&name("geocoder")).err().unwrap();
         assert!(err.to_string().contains("version 99.0.0 is fixed") && err.to_string().contains("offline mode"), "{err}");
         let err = opener(vec![], "", data.path()).open(&name("tiles")).err().unwrap();
-        assert!(err.to_string().contains("feature `tiles`"), "{err}");
+        assert!(err.to_string().contains("neither linked into this geko nor in GEKO_MODULES"), "{err}");
     }
 
     #[test]
     fn with_geko_modules_a_missing_module_is_an_error_not_a_download() {
         let data = tempfile::tempdir().unwrap();
         let ok: Open = |_| Ok(Box::new(Named("geocoder", CONTRACT)));
-        let o = opener(vec![("geocoder", ok)], "", data.path()).without_downloads();
+        let o = opener(vec![geocoder(ok)], "", data.path()).without_downloads();
         assert_eq!(o.open(&name("geocoder")).unwrap().origin, Origin::Linked);
         let err = o.open(&name("tiles")).err().unwrap().to_string();
         assert!(err.contains("not downloaded") && err.contains("DEV_MODULES=…,tiles"), "{err}");
