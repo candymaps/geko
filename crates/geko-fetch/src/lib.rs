@@ -159,7 +159,9 @@ impl HttpDownloader {
             }
         };
 
-        io::copy(&mut response.into_reader(), &mut file)
+        let length = response.header("Content-Length").and_then(|v| v.parse::<u64>().ok());
+        geko_module_sdk::progress::expect_bytes(length.unwrap_or(0));
+        io::copy(&mut Counted(response.into_reader()), &mut file)
             .map_err(|e| AttemptError::retryable(GekoError::Data(format!("GET {}: transfer interrupted: {e}", req.url))))?;
         file.sync_all().map_err(AttemptError::fatal)?;
         Ok(Attempt::Complete { etag, last_modified })
@@ -269,6 +271,7 @@ impl Downloader for HttpDownloader {
         if len == 0 {
             return Ok(Vec::new());
         }
+        geko_module_sdk::progress::expect_bytes(len);
         self.retrying(url, || {
             let range = format!("bytes={start}-{}", start + len - 1);
             let response = self.agent.get(url).set("Range", &range).call().map_err(|e| request_error("GET", url, e))?;
@@ -280,6 +283,7 @@ impl Downloader for HttpDownloader {
             if bytes.len() as u64 != len {
                 return Err(AttemptError::retryable(GekoError::Data(format!("GET {url} with {range}: {} bytes", bytes.len()))));
             }
+            geko_module_sdk::progress::advance_bytes(len);
             Ok(bytes)
         })
     }
@@ -352,6 +356,17 @@ fn hash_file(path: &Path) -> Result<Digests> {
         size += n as u64;
     }
     Ok(Digests { sha256: hex::encode(sha.finalize()), md5: hex::encode(md5.finalize()), size })
+}
+
+/// A response that counts what is read of it in the progress of the build.
+struct Counted<R>(R);
+
+impl<R: Read> Read for Counted<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.0.read(buf)?;
+        geko_module_sdk::progress::advance_bytes(n as u64);
+        Ok(n)
+    }
 }
 
 #[cfg(test)]

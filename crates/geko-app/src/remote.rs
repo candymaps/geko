@@ -133,6 +133,11 @@ impl<C: Channel> Module for Remote<C> {
         }
     }
 
+    fn progress(&self) -> Option<geko_module_sdk::progress::Progress> {
+        // A module of an older SDK does not know the call: it just shows no progress.
+        self.ask(Call::Progress).ok().flatten()
+    }
+
     fn unavailable(&self) -> Option<String> {
         self.channel.unavailable()
     }

@@ -31,6 +31,7 @@ pub enum Call {
     /// Its body travels as the payload of the frame.
     Handle(Request),
     Metrics,
+    Progress,
     Shutdown,
     Command { name: String, args: Vec<String> },
 }
@@ -141,7 +142,11 @@ pub(crate) fn answer(module: &dyn Module, call: Call, payload: Vec<u8>) -> (Repl
             Call::Plan => (json(&module.plan()?), Vec::new()),
             Call::Fetch { refresh } => (json(&module.fetch(refresh)?), Vec::new()),
             Call::Ready => (json(&module.ready()?), Vec::new()),
-            Call::Build { force, refresh } => (json(&module.build(force, refresh)?), Vec::new()),
+            Call::Build { force, refresh } => {
+                let _building = crate::progress::Building::start();
+                (json(&module.build(force, refresh)?), Vec::new())
+            }
+            Call::Progress => (json(&module.progress()), Vec::new()),
             Call::Published => (json(&module.published()?), Vec::new()),
             Call::NextBuild => (json(&module.next_build()), Vec::new()),
             Call::Purge(what) => (json(&module.purge(what)?), Vec::new()),

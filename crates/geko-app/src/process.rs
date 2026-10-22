@@ -419,7 +419,7 @@ impl Channel for Process {
             return Err(refused(500, format!("this request was in flight when the module failed, more than once: refused for up to {minutes} min"), None));
         }
         let connection = self.connection()?;
-        let timeout = matches!(call, Call::Handle(_) | Call::Metrics).then_some(shared.limits.timeout);
+        let timeout = matches!(call, Call::Handle(_) | Call::Metrics | Call::Progress).then_some(shared.limits.timeout);
         match connection.call(call, payload, timeout) {
             Ok(answer) => answer,
             Err(Failure::Gone) => {

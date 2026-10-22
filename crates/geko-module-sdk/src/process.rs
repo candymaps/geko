@@ -88,7 +88,7 @@ pub fn serve_on(stream: UnixStream, open: Open) -> Result<()> {
             Err(e) => return Err(e.into()),
         };
         match call {
-            Call::Handle(_) | Call::Metrics => jobs.send((id, call, payload)).expect("the workers outlive the loop"),
+            Call::Handle(_) | Call::Metrics | Call::Progress => jobs.send((id, call, payload)).expect("the workers outlive the loop"),
             Call::Shutdown => {
                 let (reply, payload) = answer(&*module, call, payload);
                 writer.send(id, &reply, &payload)?;

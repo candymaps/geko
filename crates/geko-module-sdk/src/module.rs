@@ -330,6 +330,11 @@ pub trait Module: Send + Sync {
         Ok(())
     }
 
+    /// How far its `build` has gone, asked while it runs (`progress`).
+    fn progress(&self) -> Option<crate::progress::Progress> {
+        crate::progress::current()
+    }
+
     /// Why the module cannot answer now, if it cannot: the host's side of a module that is not
     /// linked in (its process exited and is starting again, or failed too often), which `/health`
     /// reports. It never reaches the module itself.

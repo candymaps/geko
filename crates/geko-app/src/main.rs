@@ -27,6 +27,9 @@ struct Cli {
     /// Comma-separated active modules; replaces the `[modules]` section.
     #[arg(long, global = true, value_delimiter = ',')]
     modules: Option<Vec<ModuleName>>,
+    /// Log every step of a build, instead of its progress every 5 seconds.
+    #[arg(long, global = true)]
+    verbose: bool,
     #[command(subcommand)]
     command: Command,
 }
@@ -191,11 +194,18 @@ fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Resul
 }
 
 fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    if cli.verbose {
+        // SAFETY: nothing else runs yet. The processes of the modules inherit it.
+        unsafe { std::env::set_var(geko_module_sdk::progress::VERBOSE, "1") };
+    }
+    use tracing_subscriber::prelude::*;
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
+        .finish()
+        .with(tracing_subscriber::filter::filter_fn(geko_module_sdk::progress::shown))
         .init();
 
-    let cli = Cli::parse();
     let path = config::config_path();
     let config = if path.exists() { Config::load(&path)? } else { Config::default() };
     let active = modules::resolve(&config, cli.modules.as_deref())?;
