@@ -15,7 +15,7 @@ range=("$base" ${2:+"$2"})
 
 while IFS= read -r file; do
     case $file in
-        *.md | docs/* | LICENSE | CLA.md | develop/* | Dockerfile | .dockerignore | .github/* | Makefile | make.cmd | ci/affected.sh) ;;
+        *.md | docs/* | LICENSE | develop/* | Dockerfile | .dockerignore | .github/* | Makefile | make.cmd | ci/affected.sh) ;;
         *) echo "--variant code,contracts"; exit 0 ;;
     esac
 done < <(git diff --name-only "${range[@]}")

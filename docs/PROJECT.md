@@ -126,7 +126,7 @@ attribution_contact = ""
 
 ## 6. Licencias y atribución
 
-**Decisión (2026-10-21):** el código se licencia con AGPL-3.0-only ([LICENSE](../LICENSE)), y toda contribución externa exige firmar antes el CLA ([CLA.md](../CLA.md)), para poder cambiar de licencia o dar licencias comerciales.
+**Decisión (2026-10-21, revisada el 2026-10-23):** el código se licencia con AGPL-3.0-only ([LICENSE](../LICENSE)), y cada contribución se acepta con esa misma licencia, sin CLA: solo los colaboradores del repositorio pueden abrir pull requests. Sin CLA, el código de otros no se puede relicenciar ni dar con licencias comerciales; si algún día hiciera falta, se pediría permiso a sus autores.
 
 - Cada módulo declara las licencias de lo que descarga; `geko plan` las lista, y pasan al manifiesto del bundle.
 - `/v1/attribution` (sin clave de API): las licencias y atribuciones de las fuentes del bundle, a quién pedir el código de la base derivada (`[serve] attribution_contact`, ODbL 4.6) y lo que añade cada módulo (el geocoder, el aviso de base derivada y dónde está su método).
@@ -280,7 +280,7 @@ ci/test.sh [--variant code,contracts]
 
 Se usan así:
 
-- **En cada pull request, en la CI** (`ci.yml`): `ci/test.sh` entero si toca lo que compilan las comprobaciones (`ci/affected.sh`), nada si solo es documentación o lo que no compilan. El trabajo `test` y `protected.yml` son los estados que exige la protección de `main` y `dev`, con la rama al día, y `pr-comment.yml` comenta en la PR si pasaron, fallaron o no hacían falta. `protected.yml` falla una PR de cualquiera salvo el propietario (Dependabot solo puede subir las acciones de `.github/workflows/`) que cambie `LICENSE`, `CLA.md`, `CONTRIBUTING.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `.github/`, `ci/` o lo que fija lo estrictas que son las comprobaciones (`deny.toml`, `clippy.toml`, `.cargo/`, `rust-toolchain.toml`); va en `pull_request_target`, que GitHub ejecuta tal como está en la rama base, para que la PR no pueda cambiarlo.
+- **En cada pull request, en la CI** (`ci.yml`): `ci/test.sh` entero si toca lo que compilan las comprobaciones (`ci/affected.sh`), nada si solo es documentación o lo que no compilan. El trabajo `test` y `protected.yml` son los estados que exige la protección de `main` y `dev`, con la rama al día, y `pr-comment.yml` comenta en la PR si pasaron, fallaron o no hacían falta. `protected.yml` falla una PR de cualquiera salvo el propietario (Dependabot solo puede subir las acciones de `.github/workflows/`) que cambie `LICENSE`, `CONTRIBUTING.md`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `.github/`, `ci/` o lo que fija lo estrictas que son las comprobaciones (`deny.toml`, `clippy.toml`, `.cargo/`, `rust-toolchain.toml`); va en `pull_request_target`, que GitHub ejecuta tal como está en la rama base, para que la PR no pueda cambiarlo.
 - **En cada push a `main`, en la CI** (`publish.yml`), que solo llega por una PR ya comprobada: sin repetir las comprobaciones, la imagen, si el push toca lo que entra en ella, y la etiqueta `sdk-<contrato>`, si cambió la SDK o lo que comparte con los módulos.
 - **En local, a mano:** `make test` (todo) o `make test-changed` (lo que el cambio puede romper).
 - **Los módulos** se comprueban en su repositorio: su golden y su rendimiento, con el host enlazado (`geko_app::main`).
