@@ -1,6 +1,6 @@
 //! A module loaded by the host as a library (docs/MODULES_PLAN.md, `DylibModule`): a `cdylib` that
 //! exports the functions of `export_module!`, a minimal `extern "C"` boundary across which the
-//! messages of `wire` travel as bytes, the same as over the socket of a process. Each side frees
+//! messages of `wire` travel as bytes. Each side frees
 //! the memory it allocated (`geko_module_free`), and no panic crosses the boundary.
 
 use std::ffi::c_void;

@@ -2,8 +2,7 @@
 //! with its `Context` and then asked, through `Module`, for what each command of the host needs:
 //! to prepare, plan, fetch and build its part of a bundle, and to load that part and answer the
 //! requests of its routes. Every type that crosses it is plain data, so that the same contract
-//! holds whether the module is linked into the host, runs as a process or is a library loaded at
-//! run time.
+//! holds whether the module is linked into the host or is a library loaded at run time.
 
 use std::fmt;
 use std::path::PathBuf;
@@ -335,9 +334,8 @@ pub trait Module: Send + Sync {
         crate::progress::current()
     }
 
-    /// Why the module cannot answer now, if it cannot: the host's side of a module that is not
-    /// linked in (its process exited and is starting again, or failed too often), which `/health`
-    /// reports. It never reaches the module itself.
+    /// Why the module cannot answer now, if it cannot, which `/health` reports: the host's side of
+    /// a module, never asked of the module itself. No adapter reports one today.
     fn unavailable(&self) -> Option<String> {
         None
     }

@@ -26,11 +26,10 @@ pub fn default_registry(module: &ModuleName) -> String {
     format!("ghcr.io/candymaps/geko-{module}")
 }
 
-/// How the host runs a package.
+/// How the host runs a package: always loaded as a library into its process (`DylibModule`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Kind {
-    Process,
     Dylib,
 }
 
@@ -40,7 +39,7 @@ pub enum Kind {
 #[serde(deny_unknown_fields)]
 pub struct Package {
     pub kind: Kind,
-    /// The file to run or load, relative to the package.
+    /// The library to load, relative to the package.
     pub entry: PathBuf,
     pub name: Option<ModuleName>,
     pub version: Option<String>,
@@ -249,10 +248,10 @@ mod tests {
         std::fs::create_dir_all(dir).unwrap();
         std::fs::write(
             dir.join("module.toml"),
-            format!("kind = \"process\"\nentry = \"geko-geocoder\"\nname = \"geocoder\"\nversion = \"{version}\"\ncontract = {contract}\nplatform = \"{}\"\n", platform()),
+            format!("kind = \"dylib\"\nentry = \"libgeko_geocoder.so\"\nname = \"geocoder\"\nversion = \"{version}\"\ncontract = {contract}\nplatform = \"{}\"\n", platform()),
         )
         .unwrap();
-        std::fs::write(dir.join("geko-geocoder"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.join("libgeko_geocoder.so"), "").unwrap();
         std::fs::write(dir.join(".digest"), "sha256:x").unwrap();
     }
 

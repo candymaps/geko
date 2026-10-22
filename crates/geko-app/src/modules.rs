@@ -2,8 +2,8 @@
 //! is, in this order: the package of `GEKO_MODULES` (never downloaded); the one linked in
 //! (`StaticModule`, by the binary that runs the host), unless `[modules.<module>] version` fixes another
 //! version; or the one downloaded from its registry (`store`), the newest of the contract of this
-//! geko or the version fixed, but never with `GEKO_MODULES`. A package runs as a process of its own (`ProcessModule`) or is loaded
-//! as a library (`DylibModule`), as its `module.toml` says.
+//! geko or the version fixed, but never with `GEKO_MODULES`. A package is loaded as a library into the
+//! process of the host (`DylibModule`).
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -72,7 +72,7 @@ pub fn resolve(config: &Config, cli: Option<&[ModuleName]>) -> Result<Vec<Module
 pub enum Origin {
     Linked,
     Local(PathBuf),
-    Downloaded { how: String, kind: Kind, fixed: bool },
+    Downloaded { how: String, fixed: bool },
 }
 
 impl std::fmt::Display for Origin {
@@ -80,8 +80,8 @@ impl std::fmt::Display for Origin {
         match self {
             Origin::Linked => f.write_str("linked in"),
             Origin::Local(dir) => write!(f, "from GEKO_MODULES, {}", dir.display()),
-            Origin::Downloaded { how, kind, fixed } => {
-                write!(f, "{how}, {}", if *kind == Kind::Dylib { "library" } else { "process" })?;
+            Origin::Downloaded { how, fixed } => {
+                f.write_str(how)?;
                 if *fixed { f.write_str(", version fixed in geko.toml") } else { Ok(()) }
             }
         }
@@ -110,13 +110,6 @@ pub struct Opener {
 fn start(dir: &Path, package: &Package, context: Context) -> Result<Box<dyn Module>> {
     let entry = dir.join(&package.entry);
     match package.kind {
-        #[cfg(unix)]
-        Kind::Process => Ok(Box::new(crate::process::start(entry, context)?)),
-        #[cfg(not(unix))]
-        Kind::Process => {
-            let _ = (entry, context);
-            Err(GekoError::Config(format!("{}: a module of kind `process` only runs on Unix", dir.display())))
-        }
         Kind::Dylib => Ok(Box::new(crate::dylib::load(&entry, context)?)),
     }
 }
@@ -160,7 +153,7 @@ impl Opener {
     fn downloaded(&self, name: &ModuleName, version: Option<&str>) -> Result<Opened> {
         let found = self.store.find(name, &self.registry(name), version)?;
         let module = start(&found.dir, &found.package, self.context(name)?)?;
-        Ok(Opened { module: Arc::from(module), origin: Origin::Downloaded { how: found.how, kind: found.package.kind, fixed: version.is_some() } })
+        Ok(Opened { module: Arc::from(module), origin: Origin::Downloaded { how: found.how, fixed: version.is_some() } })
     }
 
     /// Opens the module `name` as configured.
@@ -192,17 +185,13 @@ impl Opener {
     }
 
     /// The module `name` of `version`, the one a bundle was built by, to serve it: `None` when the
-    /// module in service is kept (one linked in or of `GEKO_MODULES`, which serve as they are).
+    /// module in service is kept (one linked in or of `GEKO_MODULES`, which serve as they are). A
+    /// downloaded one is a library, which stays loaded: another version needs a restart.
     pub fn reopen(&self, name: &ModuleName, version: &str, current: &Origin) -> Result<Option<Arc<dyn Module>>> {
-        let Origin::Downloaded { kind, .. } = current else { return Ok(None) };
-        if *kind == Kind::Dylib {
-            return Err(GekoError::Incompatible(format!(
-                "the bundle was built by module `{name}` {version}: a module loaded as a library changes its version only when geko restarts"
-            )));
-        }
-        let opened = self.downloaded(name, Some(version))?;
-        check(name, &*opened.module)?;
-        Ok(Some(opened.module))
+        let Origin::Downloaded { .. } = current else { return Ok(None) };
+        Err(GekoError::Incompatible(format!(
+            "the bundle was built by module `{name}` {version}: a module loaded as a library changes its version only when geko restarts"
+        )))
     }
 }
 
@@ -324,7 +313,7 @@ mod tests {
         let data = tempfile::tempdir().unwrap();
         let o = opener(vec![], "", data.path());
         assert!(o.reopen(&name("geocoder"), "2.0.0", &Origin::Linked).unwrap().is_none());
-        let library = Origin::Downloaded { how: String::new(), kind: Kind::Dylib, fixed: false };
+        let library = Origin::Downloaded { how: String::new(), fixed: false };
         assert!(o.reopen(&name("geocoder"), "2.0.0", &library).err().unwrap().to_string().contains("restarts"));
     }
 }

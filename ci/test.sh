@@ -9,7 +9,7 @@
 #   code          clippy (warnings are errors), dependency rules (what each crate of the host and
 #                 each technology may use), and licenses and security advisories (cargo-deny)
 #   contracts     unit tests and the conformance suites of the SDK: the module contract through
-#                 each adapter, and the Downloader
+#                 its adapter (dylib), and the Downloader
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

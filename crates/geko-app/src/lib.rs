@@ -5,8 +5,6 @@ mod bundle;
 mod config;
 mod dylib;
 mod modules;
-#[cfg(unix)]
-mod process;
 mod progress;
 mod remote;
 mod run;
@@ -200,7 +198,7 @@ fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Resul
 pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     let cli = Cli::parse();
     if cli.verbose {
-        // SAFETY: nothing else runs yet. The processes of the modules inherit it.
+        // SAFETY: nothing else runs yet. The modules, loaded into this process, read it.
         unsafe { std::env::set_var(geko_module_sdk::progress::VERBOSE, "1") };
     }
     use tracing_subscriber::prelude::*;

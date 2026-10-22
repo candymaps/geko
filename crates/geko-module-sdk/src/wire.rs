@@ -1,13 +1,13 @@
 //! The messages of the contract between the host and a module that is not linked into it
-//! (docs/MODULES_PLAN.md): a process of its own (`process`) or a library loaded at run time
-//! (`dylib`). Both speak the same messages, so that one protocol serves the two.
+//! (docs/MODULES_PLAN.md): a library loaded at run time (`dylib`), whose functions pass these
+//! messages as bytes.
 //!
 //! A frame is the length of its header and that of its payload (`u32`, little-endian), the header
 //! as JSON and the payload as raw bytes: the bodies of requests and responses, which JSON would
 //! inflate. The first message is the module's greeting with its contract, so that a host that does
 //! not speak it refuses the module before asking it anything; the first call opens it.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use serde::{Deserialize, Serialize};
@@ -95,11 +95,6 @@ pub(crate) fn json<T: Serialize>(value: &T) -> serde_json::Value {
     serde_json::to_value(value).expect("the types of the contract are plain data")
 }
 
-/// Writes a frame in a single write, so that the threads sharing a socket never interleave.
-pub fn write_frame<T: Serialize>(w: &mut impl Write, id: u64, msg: &T, payload: &[u8]) -> io::Result<()> {
-    w.write_all(&frame(id, msg, payload)?)
-}
-
 pub fn frame<T: Serialize>(id: u64, msg: &T, payload: &[u8]) -> io::Result<Vec<u8>> {
     let header = serde_json::to_vec(&Envelope { id, msg }).map_err(io::Error::other)?;
     let mut frame = Vec::with_capacity(8 + header.len() + payload.len());
@@ -181,9 +176,8 @@ mod tests {
 
     #[test]
     fn frames_carry_header_and_payload() {
-        let mut buf = Vec::new();
-        write_frame(&mut buf, 7, &Call::Fetch { refresh: true }, b"\0bytes").unwrap();
-        write_frame(&mut buf, 8, &Call::Metrics, &[]).unwrap();
+        let mut buf = frame(7, &Call::Fetch { refresh: true }, b"\0bytes").unwrap();
+        buf.extend(frame(8, &Call::Metrics, &[]).unwrap());
         let mut r = &buf[..];
         let (id, call, payload) = read_frame::<Call>(&mut r).unwrap();
         assert_eq!((id, payload.as_slice()), (7, &b"\0bytes"[..]));

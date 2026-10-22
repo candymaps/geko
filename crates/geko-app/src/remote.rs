@@ -1,6 +1,6 @@
 //! A module that is not linked into the host (docs/MODULES_PLAN.md): every method of `Module` is a
-//! message of `geko_module_sdk::wire`, carried by a `Channel`: the socket of a process of its own
-//! (`process`) or the functions of a library loaded at run time (`dylib`).
+//! message of `geko_module_sdk::wire`, carried by a `Channel`: the functions of a library loaded at
+//! run time (`dylib`).
 
 use std::time::Duration;
 
@@ -12,42 +12,9 @@ use serde::de::DeserializeOwned;
 /// What the module answered to a call, and the payload of the answer.
 pub type Answer = Result<(serde_json::Value, Vec<u8>)>;
 
-/// A call that the channel did not carry to the module, and how its request is answered instead.
-#[derive(Debug)]
-pub struct Refused {
-    pub status: u16,
-    pub message: String,
-    pub retry_after: Option<Duration>,
-}
-
-impl std::fmt::Display for Refused {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Refused {}
-
-pub fn refused(status: u16, message: String, retry_after: Option<Duration>) -> GekoError {
-    GekoError::Other(Box::new(Refused { status, message, retry_after }))
-}
-
 /// How the calls reach a module.
 pub trait Channel: Send + Sync {
     fn exchange(&self, call: &Call, payload: &[u8]) -> Answer;
-
-    /// Why the module cannot answer now (`Module::unavailable`).
-    fn unavailable(&self) -> Option<String> {
-        None
-    }
-
-    /// After the module loaded `bundle`.
-    fn loaded(&self, bundle: &BundleView) {
-        let _ = bundle;
-    }
-
-    /// After the module answered its shutdown.
-    fn shut_down(&self) {}
 }
 
 pub fn decode<T: DeserializeOwned>(value: serde_json::Value) -> Result<T> {
@@ -111,9 +78,7 @@ impl<C: Channel> Module for Remote<C> {
     }
 
     fn load(&self, bundle: &BundleView) -> Result<()> {
-        self.ask::<()>(Call::Load(bundle.clone()))?;
-        self.channel.loaded(bundle);
-        Ok(())
+        self.ask::<()>(Call::Load(bundle.clone()))
     }
 
     fn handle(&self, mut request: Request) -> Response {
@@ -121,14 +86,6 @@ impl<C: Channel> Module for Remote<C> {
         let answer = self.channel.exchange(&Call::Handle(request), &body);
         match answer.and_then(|(value, body)| Ok(Response { body, ..decode(value)? })) {
             Ok(response) => response,
-            Err(GekoError::Other(e)) if e.is::<Refused>() => {
-                let r = e.downcast_ref::<Refused>().expect("checked");
-                let response = Response::error(r.status, &r.message);
-                match r.retry_after {
-                    Some(after) => response.with_header("retry-after", after.as_secs().max(1).to_string()),
-                    None => response,
-                }
-            }
             Err(e) => Response::error(500, &e.to_string()),
         }
     }
@@ -136,10 +93,6 @@ impl<C: Channel> Module for Remote<C> {
     fn progress(&self) -> Option<geko_module_sdk::progress::Progress> {
         // A module of an older SDK does not know the call: it just shows no progress.
         self.ask(Call::Progress).ok().flatten()
-    }
-
-    fn unavailable(&self) -> Option<String> {
-        self.channel.unavailable()
     }
 
     fn metrics(&self, out: &mut String) {
@@ -150,9 +103,7 @@ impl<C: Channel> Module for Remote<C> {
     }
 
     fn shutdown(&self) -> Result<()> {
-        let done = self.ask::<()>(Call::Shutdown);
-        self.channel.shut_down();
-        done
+        self.ask::<()>(Call::Shutdown)
     }
 
     fn command(&self, name: &str, args: &[String]) -> Result<String> {
@@ -160,7 +111,7 @@ impl<C: Channel> Module for Remote<C> {
     }
 }
 
-/// What every channel must carry the same: the fake module and the checks of `process` and `dylib`.
+/// What the channel must carry as the module keeps it: the fake module and the checks of `dylib`.
 #[cfg(test)]
 pub mod tests {
     use std::path::PathBuf;
@@ -202,13 +153,8 @@ pub mod tests {
         }
 
         fn handle(&self, r: Request) -> Response {
-            match r.query.first().map(|(k, _)| k.as_str()) {
-                Some("panic") => panic!("asked to"),
-                Some("exit") => std::process::exit(3),
-                Some("hang") => loop {
-                    std::thread::sleep(Duration::from_secs(1));
-                },
-                _ => {}
+            if r.query.first().is_some_and(|(k, _)| k == "panic") {
+                panic!("asked to");
             }
             let loaded = self.loaded.lock().unwrap().clone().unwrap_or_default();
             let mut body = format!("{loaded}:").into_bytes();

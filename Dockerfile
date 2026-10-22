@@ -35,7 +35,7 @@ COPY --from=build /out/geko /geko
 FROM scratch AS geocoder
 FROM scratch AS tiles
 
-# geko and the modules of MODULES (comma-separated), each as a process of its own, as
+# geko and the modules of MODULES (comma-separated), each as the library that geko loads, as
 # GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
 # the bundles they build: <version>-<commit> from `make start-dev`.
 FROM rust:1.99.0-bookworm AS build-local
@@ -61,9 +61,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
       [ -f /modules/$m/Cargo.toml ] || { echo "module $m: its repository is not the build context $m (develop/compose.yaml)" >&2; exit 1; }; \
       rm -rf /work/$m && cp -r /modules/$m /work/$m && cd /work/$m; \
       sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
-      cargo build --profile $PROFILE --bin geko-$m --target-dir /src/target/modules; \
-      mkdir /out/modules/$m; cp /src/target/modules/$PROFILE/geko-$m /out/modules/$m/; \
-      cp "$(find . -name module.toml -not -path './target/*' | head -1)" /out/modules/$m/; \
+      package=$(find . -name module.toml -not -path './target/*' | head -1); \
+      entry=$(sed -n 's/^entry *= *"\(.*\)"/\1/p' "$package"); \
+      cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
+      mkdir /out/modules/$m; cp "/src/target/modules/$PROFILE/$entry" "$package" /out/modules/$m/; \
       cd /src; \
     done
 

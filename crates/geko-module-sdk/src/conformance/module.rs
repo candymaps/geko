@@ -1,7 +1,7 @@
 //! Conformance of `Module`: what every module must keep for the host, whatever it does, opened
 //! with an empty scope and no bundle loaded. Each module runs it from its own tests, linked in; the
-//! host runs it through each adapter, so that the process and the library carry the contract as
-//! the module keeps it.
+//! host runs it through its adapter, so that the library carries the contract as the module keeps
+//! it.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

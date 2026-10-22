@@ -11,7 +11,7 @@ geko es un motor geoespacial modular y multipaís. Este repositorio es **el host
 
 Todo el ciclo es **automático**: se declaran en `geko.toml` el ámbito y los módulos, y geko baja los módulos, les pide que descarguen y generen lo suyo para el ámbito, publica el bundle y lo sirve (sección 7).
 
-Los objetivos medibles de cada servicio (latencia, caudal, acierto frente a Pelias) son de su módulo. Los del host: que el salto hasta el módulo no se note en sus medidas (medido con el geocoder y España, docs/MODULES_PLAN.md, paso 2) y que un fallo de un módulo no tire el servicio (`ProcessModule`).
+Los objetivos medibles de cada servicio (latencia, caudal, acierto frente a Pelias) son de su módulo. Los del host: que el salto hasta el módulo no se note en sus medidas (medido con el geocoder y España, docs/MODULES_PLAN.md, paso 2) y que un pánico de un módulo solo falle su petición (`catch_unwind` en la frontera de `DylibModule`; un fallo más grave, como un segfault o quedarse sin memoria, sí tira el servicio, que comparte proceso con el módulo).
 
 ### 1.1 No objetivos (por ahora)
 
@@ -33,7 +33,7 @@ Se abstrae **solo donde hay una alternativa realista o la decisión técnica est
 
 - **Un módulo desactivado no consume recursos:** no se descarga, no se instancia, no abre ficheros y no registra rutas.
 - **Activación** con `[modules]` en `geko.toml` o `--modules` en la línea de órdenes. Al menos uno activo.
-- **Origen**, por orden: enlazado en el binario (ninguno en el de este repositorio; un módulo puede enlazarse con `geko_app::main` para sus propias pruebas), una carpeta de `GEKO_MODULES` (con su `module.toml`, como proceso o biblioteca: `kind = "process" | "dylib"`) o descargado y firmado de `ghcr.io/candymaps/geko-<módulo>` (sección 7). Con `GEKO_MODULES`, un módulo que no está ahí ni enlazado es un error, nunca una descarga.
+- **Origen**, por orden: enlazado en el binario (ninguno en el de este repositorio; un módulo puede enlazarse con `geko_app::main` para sus propias pruebas), una carpeta de `GEKO_MODULES` (con su `module.toml`, como biblioteca: `kind = "dylib"`) o descargado y firmado de `ghcr.io/candymaps/geko-<módulo>` (sección 7). Con `GEKO_MODULES`, un módulo que no está ahí ni enlazado es un error, nunca una descarga.
 - **Independencia:** el host no depende de ningún módulo, y ningún módulo de otro. Lo que comparten va a la SDK.
 - **Rutas** bajo el nombre del módulo (`/geocoder/…`, `/tiles/…`): dos módulos no pueden pisarse.
 - **Configuración** propia de cada módulo, `geko-<módulo>.toml`, junto a `geko.toml`: el host no la lee, se la pasa.
@@ -60,7 +60,7 @@ La generación y el servicio pueden correr en **máquinas distintas**: la genera
  ┌────────────────────────────── nodo de servicio ───────────────────────────────┐
  │  recarga: descarga, valida, carga cada módulo, cambio atómico (ArcSwap)        │
  │  HTTP (axum): /health, /metrics, /v1/attribution, /docs, claves, CORS, límites │
- │            └─► /<módulo>/… ─► Module::handle (enlazado, socket o biblioteca)   │
+ │            └─► /<módulo>/… ─► Module::handle (enlazado o biblioteca)           │
  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -78,13 +78,13 @@ La generación y el servicio pueden correr en **máquinas distintas**: la genera
 
 ### 3.2 Plataformas
 
-El servicio de producción es Linux. El desarrollo puede hacerse en Windows o WSL; `ProcessModule` (socket Unix) solo existe en Unix.
+El servicio de producción es Linux. El desarrollo puede hacerse en Windows o WSL.
 
 ## 4. Puertos (traits)
 
 | Puerto | Responsabilidad | Implementaciones |
 |---|---|---|
-| `Module` | El contrato de un módulo: describirse, planificar, descargar, generar su parte del bundle, cargarla, atender peticiones, métricas, órdenes | `StaticModule` (enlazado), `ProcessModule` (proceso propio, socket Unix), `DylibModule` (biblioteca cargada en el proceso) |
+| `Module` | El contrato de un módulo: describirse, planificar, descargar, generar su parte del bundle, cargarla, atender peticiones, métricas, órdenes | `StaticModule` (enlazado), `DylibModule` (biblioteca cargada en el proceso; el único adaptador de un paquete desde el 2026-10-23) |
 | `Downloader` | Descargar ficheros con caché, reanudación, ETag, reintentos y sumas de control | `geko-fetch` (HTTP); descargadores falsos en las pruebas |
 
 El contrato está en `crates/geko-module-sdk` (`module.rs`), con su número (`CONTRACT`). Un cambio que lo rompe sube el número; uno aditivo, no. Cada módulo publicado lleva el contrato que habla, y el host baja el último de su contrato.
@@ -210,7 +210,7 @@ bundles/
 
 En `geko-module-sdk`, con la *feature* `conformance`:
 
-- **`Module`** (`conformance::module::check`): sobre un módulo abierto con el ámbito vacío y sin bundle, `describe` lleva el contrato de la SDK, una versión y rutas válidas sin repetir; su `openapi` es una de sus rutas GET; órdenes sin repetir y error para una desconocida; `/metrics` en formato de Prometheus bajo `geko_`; cada ruta, con peticiones raras, responde sin 500 y con errores `{"error": …}` en JSON, también tras un bundle que no pudo cargar y desde 8 hilos a la vez. La pasa cada módulo desde sus pruebas y, en `geko-app`, un módulo de prueba por cada adaptador (enlazado, proceso y biblioteca).
+- **`Module`** (`conformance::module::check`): sobre un módulo abierto con el ámbito vacío y sin bundle, `describe` lleva el contrato de la SDK, una versión y rutas válidas sin repetir; su `openapi` es una de sus rutas GET; órdenes sin repetir y error para una desconocida; `/metrics` en formato de Prometheus bajo `geko_`; cada ruta, con peticiones raras, responde sin 500 y con errores `{"error": …}` en JSON, también tras un bundle que no pudo cargar y desde 8 hilos a la vez. La pasa cada módulo desde sus pruebas y, en `geko-app`, un módulo de prueba enlazado y como biblioteca.
 - **`Downloader`**: la pasa `geko-fetch`, contra un servidor HTTP falso.
 
 ## 13. Estructura del repositorio
@@ -251,7 +251,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 |---|---|---|---|---|
 | 26 | Licencias antes de abrir el servicio | El aviso de base derivada (ODbL 4.6) está servido (`/v1/attribution`) | S | ⬜ Fuera del código: que lo revise un abogado y fijar `[serve] attribution_contact` |
 | 43 | `BundleStore` con S3 y enrutador entre nodos | Hoy los bundles se sirven de disco o por HTTP (`bundles_url`) | M | ⬜ Cuando un nodo no baste |
-| 46 | Módulos descargables | Plan en [MODULES_PLAN.md](MODULES_PLAN.md) | L | ⬜ Pasos 1–5 y 7 hechos; del 6, la suite hecha, y quedan unas semanas de uso real. ⏸️ Aplazado: `DylibModule` por defecto, elegido por la medición con España |
+| 46 | Módulos descargables | Plan en [MODULES_PLAN.md](MODULES_PLAN.md) | L | ⬜ Pasos 1–5 y 7 hechos; del 6, la suite hecha, y quedan unas semanas de uso real. Decidido (2026-10-23): `DylibModule`, elegido por la medición con España, es el único adaptador; `ProcessModule` se quitó |
 | 47 | Pruebas cruzadas | El golden del geocoder contra la última imagen del host de su contrato, y la conformidad del host contra el último módulo publicado (MODULES_PLAN.md, paso 7) | M | ⬜ |
 
 ## 17. Rutas
@@ -263,7 +263,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 
 ## 18. Estado
 
-- **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado, como proceso propio o como biblioteca (`GEKO_MODULES`, `kind`), o se baja firmado de ghcr.io; la imagen publicada no lleva ninguno. Un proceso que cae se relanza aparte, con espera creciente, cuarentena de la consulta que lo tumba y plazo por llamada. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso se pierde del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido.
+- **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
 - **Servicio:** página de demostración en `/`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
