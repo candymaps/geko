@@ -6,11 +6,15 @@
 pub mod bundle;
 pub mod country;
 pub mod download;
+pub mod dylib;
 pub mod error;
 pub mod incremental;
 pub mod module;
+#[cfg(unix)]
+pub mod process;
 pub mod scope;
 pub mod stages;
+pub mod wire;
 
 pub use error::{GekoError, Result};
 

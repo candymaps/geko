@@ -1,6 +1,10 @@
 mod bundle;
 mod config;
+mod dylib;
 mod modules;
+#[cfg(unix)]
+mod process;
+mod remote;
 mod run;
 
 use std::net::SocketAddr;
@@ -169,8 +173,9 @@ fn main() -> anyhow::Result<()> {
     let path = config::config_path();
     let config = if path.exists() { Config::load(&path)? } else { Config::default() };
     let linked = modules::linked();
-    let active = modules::resolve(&config, cli.modules.as_deref(), &linked)?;
-    let modules = modules::open(&config, &path, &active, &linked)?;
+    let local = modules::local()?;
+    let active = modules::resolve(&config, cli.modules.as_deref(), &linked, &local)?;
+    let modules = modules::open(&config, &path, &active, &linked, &local)?;
 
     match cli.command {
         Command::Plan => {

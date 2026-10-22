@@ -24,6 +24,7 @@ geko-module-tiles = { workspace = true, optional = true }
 anyhow.workspace = true
 clap.workspace = true
 hex = "0.4"
+libloading = "0.8"
 mimalloc = { version = "0.1", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
