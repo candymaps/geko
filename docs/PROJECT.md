@@ -253,6 +253,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 | 43 | `BundleStore` con S3 y enrutador entre nodos | Hoy los bundles se sirven de disco o por HTTP (`bundles_url`) | M | ⬜ Cuando un nodo no baste |
 | 46 | Módulos descargables | Plan en [MODULES_PLAN.md](MODULES_PLAN.md) | L | ⬜ Pasos 1–5 y 7 hechos; del 6, la suite hecha, y quedan unas semanas de uso real. Decidido (2026-10-23): `DylibModule`, elegido por la medición con España, es el único adaptador; `ProcessModule` se quitó |
 | 47 | Pruebas cruzadas | El golden del geocoder contra la última imagen del host de su contrato, y la conformidad del host contra el último módulo publicado (MODULES_PLAN.md, paso 7) | M | ⬜ |
+| 48 | Datos de un módulo desactivado | `geko purge` solo pregunta a los módulos activos, y uno desactivado no se instancia: sus descargas y ficheros de trabajo (los del geocoder: `raw/`, `staging/`, `canonical/`, `segments/`, decenas de GB con España) se quedan en `/var/lib/geko` para siempre. Además están en su raíz, sin carpeta por módulo, así que el host no sabe de quién son | M | ⬜ Cada módulo, con su carpeta de datos (`/var/lib/geko/<módulo>/`, dada en el `Context`), y el host decide cuándo borrar la de uno desactivado: nunca por defecto, para que desactivarlo un tiempo no obligue a descargar y generar de cero; a demanda con `geko purge data` (o `geko purge module <módulo>`); y, opcional, al cabo de un plazo configurable en `geko.toml` (por ejemplo `[data] purge_disabled_after_days`, apagado por defecto) |
 
 ## 17. Rutas
 
