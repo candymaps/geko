@@ -12,4 +12,4 @@ Todo desarrollo sale de `dev` a una rama propia (`feature/<nombre>`, `bugfix/<no
 
 ## Comprobaciones
 
-Antes de abrir el PR, pasa `make test` (o `ci/test.sh`). Las reglas del proyecto están en [AGENTS.md](AGENTS.md), y la especificación en [PROJECT.md](docs/PROJECT.md).
+Cada PR pasa en la CI `ci/test.sh` entero, salvo que solo cambie documentación (un comentario del bot lo dice), y no se puede fusionar hasta que pase. Los ficheros de la licencia, del CLA, de la documentación del repositorio (`README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `CLAUDE.md`) de la CI (`.github/`, `ci/`) y de la configuración de las comprobaciones (`deny.toml`, `clippy.toml`, `.cargo/`, `rust-toolchain.toml`) solo los cambia el propietario: una PR que los toque no se puede fusionar; si crees que hace falta cambiar alguno, abre una issue. Antes de abrirlo, puedes pasarlo en local con `make test` (o solo lo que tu cambio puede romper, con `make test-changed`). Las reglas del proyecto están en [AGENTS.md](AGENTS.md), y la especificación en [PROJECT.md](docs/PROJECT.md).

@@ -103,5 +103,5 @@ release: ## Compile, make the image and push it to REGISTRY (needs a clean tree 
 test: ## Every check of the host (ci/test.sh); each module checks itself in its repository
 	ci/test.sh
 
-test-changed: ## Only the checks that what changed since BASE (default: where it leaves dev) can fail, as pre-push
+test-changed: ## Only the checks that what changed since BASE (default: where it leaves dev) can fail
 	@args=$$(ci/affected.sh $(or $(BASE),$$(git merge-base HEAD origin/dev))) && if [ -z "$$args" ]; then echo "only documentation changed"; else echo "ci/test.sh $$args"; ci/test.sh $$args; fi

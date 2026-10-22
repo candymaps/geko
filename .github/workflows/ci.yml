@@ -1,154 +1,63 @@
-# The checks of what a merge to main changed, and its publication. On every push to main (or by
-# hand): `changes` finds whether what the checks build changed since the commit before; `check` runs
-# ci/test.sh on it; and when it passes, `publish` publishes the image, with the version of
-# Cargo.toml, and moves the tag of the SDK. The modules check and publish themselves, each in its
-# repository. Other branches are checked locally: .githooks/pre-push runs ci/test.sh.
+# The checks of every pull request. On a pull request (or by hand), `test` finds whether it changes
+# what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it. It is the
+# status that the protection of main and dev requires: it always runs, and passes when the checks
+# passed or were not needed. pr-comment.yml says on the pull request which of the two it was. What
+# reaches main, already checked, is published by publish.yml. The modules check and publish
+# themselves, each in its repository.
 name: ci
 
 on:
-  push:
-    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
-  # A publication cut halfway would leave a release without its tag.
-  cancel-in-progress: false
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  # A new push to a pull request supersedes its checks.
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Whether the push changed what the checks build. Without the commit before (a new branch, a
-  # forced push, a run by hand), it did.
-  changes:
+  # The checks are skipped step by step, never the job: a required job that GitHub skips counts as
+  # passed. It leaves its result in the artifact `pr` for pr-comment.yml, which may write on the pull
+  # request (this run, from a fork, may not).
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      code: ${{ steps.diff.outputs.code }}
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - id: diff
+          fetch-depth: 2
+      # Whether the pull request changes what the checks build: the diff of its merge commit with
+      # the base branch (its first parent). A run by hand checks everything.
+      - id: affected
         run: |
-          before="${{ github.event.before }}"
           code=1
-          if git cat-file -e "$before^{commit}" 2> /dev/null && [ -z "$(ci/affected.sh "$before" HEAD)" ]; then
+          if [ "${{ github.event_name }}" = pull_request ] && [ -z "$(ci/affected.sh HEAD^1 HEAD)" ]; then
             code=0
           fi
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "code $code"
-
-  check:
-    needs: changes
-    if: needs.changes.outputs.code == '1'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       # The toolchain pinned in rust-toolchain.toml.
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-      - run: ci/test.sh
-
-  # Publishes in ghcr.io, with the version of Cargo.toml:
-  # - if the push changed what goes into it (not only documentation), the image
-  #   (ghcr.io/candymaps/geko, tag <version>-<commit>), which carries no module: it downloads those
-  #   of its configuration, from their repositories;
-  # - when that version has no GitHub release yet (it was raised in Cargo.toml), also the tag
-  #   <version> and latest on the image, and the git tag v<version> on
-  #   the pushed commit, with its GitHub release, whose notes say how to pull the image. Raising the
-  #   version is how a release is made. A tag v<version> without a release (pushed by hand, or left
-  #   by a cut publication) is released only if it is on the pushed commit; on another, the version
-  #   must be raised.
-  # GitHub's own token pushes. Only once the check passed, or was skipped because nothing it covers
-  # changed.
-  publish:
-    needs: [changes, check]
-    if: >-
-      always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'candymaps/geko'
-      && needs.changes.result == 'success'
-      && contains(fromJSON('["success", "skipped"]'), needs.check.result)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: version
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - if: steps.affected.outputs.code == '1'
+        run: rustup toolchain install
+      - if: steps.affected.outputs.code == '1'
+        uses: Swatinem/rust-cache@v2
+      - if: steps.affected.outputs.code == '1'
+        run: ci/test.sh
+      - if: always() && github.event_name == 'pull_request'
         run: |
-          version=$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)
-          commit=$(git rev-parse --short HEAD)
-          # A release when v<version> has none on GitHub. Any other error of gh stops the job, so
-          # that a failed query does not publish a version twice.
-          release=0
-          if ! out=$(gh release view "v$version" 2>&1); then
-            [[ $out == *"release not found"* ]] || { echo "$out" >&2; exit 1; }
-            tagged=$(git rev-parse -q --verify "refs/tags/v$version^{commit}" || true)
-            if [ -z "$tagged" ] || [ "$tagged" = "$(git rev-parse HEAD)" ]; then
-              release=1
-            else
-              echo "::error::v$version is tagged on $tagged, not on this commit, and has no release: raise the version in Cargo.toml"
-              exit 1
-            fi
+          result=failure
+          if [ "${{ job.status }}" = success ]; then
+            result=not-needed
+            [ "${{ steps.affected.outputs.code }}" = 1 ] && result=passed
           fi
-          tags="ghcr.io/candymaps/geko:$version-$commit"
-          [ "$release" = 0 ] || tags="$tags,ghcr.io/candymaps/geko:$version,ghcr.io/candymaps/geko:latest"
-          # A new image only when the push changed what goes into it, or makes a release. Without
-          # the commit before the push (a new branch, a forced push), always.
-          image=1
-          before="${{ github.event.before }}"
-          if [ "$release" = 0 ] && git cat-file -e "$before^{commit}" 2> /dev/null \
-            && git diff --quiet "$before" HEAD -- crates Cargo.toml Cargo.lock rust-toolchain.toml Dockerfile; then
-            image=0
-          fi
-          {
-            echo "version=$version"
-            echo "commit=$commit"
-            echo "release=$release"
-            echo "tags=$tags"
-            echo "image=$image"
-          } >> "$GITHUB_OUTPUT"
-      # The SDK of the contract and what the host shares with its modules (geko-fetch, geko-artifact),
-      # which the modules use from their repositories as git dependencies: sdk-<n> follows the last
-      # commit that changed any of them within contract <n>.
-      - if: steps.version.outputs.image == '1'
-        run: |
-          contract=$(sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p' crates/geko-module-sdk/src/module.rs)
-          if [ "$(git rev-parse -q --verify "refs/tags/sdk-$contract^{commit}" || true)" = "" ] \
-            || ! git diff --quiet "sdk-$contract" HEAD -- crates/geko-module-sdk crates/geko-fetch crates/geko-artifact Cargo.lock; then
-            git tag -f "sdk-$contract" HEAD
-            git push -f origin "refs/tags/sdk-$contract"
-          fi
-      - if: steps.version.outputs.image == '1'
-        uses: docker/setup-buildx-action@v3
-      - if: steps.version.outputs.image == '1'
-        uses: docker/login-action@v3
+          echo "checks: $result"
+          printf '{"number": %s, "head": "%s", "result": "%s"}\n' \
+            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" > pr.json
+      - if: always() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - if: steps.version.outputs.image == '1'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.version.outputs.tags }}
-          build-args: |
-            VERSION=${{ steps.version.outputs.version }}
-            REVISION=${{ steps.version.outputs.commit }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      # The tag goes last: if something could not be published, the next run makes the release again.
-      # gh creates the tag and its GitHub release in one call, so neither is left without the other.
-      # The notes start with the image of the release; GitHub appends the changes since the last one.
-      - if: steps.version.outputs.release == '1'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          gh release create "v$VERSION" --target "$GITHUB_SHA" --title "v$VERSION" --generate-notes \
-            --notes "$(printf 'Image: `ghcr.io/candymaps/geko:%s`\n\n```\ndocker pull ghcr.io/candymaps/geko:%s\n```' "$VERSION" "$VERSION")"
+          name: pr
+          path: pr.json
+          retention-days: 1

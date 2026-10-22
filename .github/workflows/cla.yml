@@ -27,4 +27,4 @@ jobs:
           path-to-signatures: signatures/cla.json
           path-to-document: https://github.com/candymaps/geko/blob/main/CLA.md
           branch: cla-signatures
-          allowlist: edgaza,bot*
+          allowlist: edgaza,dependabot[bot],bot*
