@@ -4,6 +4,7 @@ mod dylib;
 mod modules;
 #[cfg(unix)]
 mod process;
+mod progress;
 mod remote;
 mod run;
 mod store;
