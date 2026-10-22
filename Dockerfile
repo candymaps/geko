@@ -35,6 +35,8 @@ COPY --from=build /out/geko /geko
 FROM rust:1.99.0-bookworm AS build-local
 ARG MODULES=geocoder
 ARG GEKO_MODULE_VERSION=
+# Not release (fat LTO, one codegen unit): every change would link it all again, for minutes.
+ARG PROFILE=ci
 WORKDIR /src
 COPY . .
 # An empty GEKO_MODULE_VERSION is unset: empty, it would be the version of the modules.
@@ -46,11 +48,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     packages=; for m in $modules; do packages="$packages -p geko-module-$m --bin geko-$m"; done; \
     # Apart: --no-default-features applies to every package of the command, and would leave the
     # modules without their own (the geocoder, without its sources).
-    cargo build --release --locked -p geko-app --no-default-features --bin geko; \
-    cargo build --release --locked $packages; \
-    mkdir -p /out/modules; cp target/release/geko /out/geko; \
+    cargo build --profile $PROFILE --locked -p geko-app --no-default-features --bin geko; \
+    cargo build --profile $PROFILE --locked $packages; \
+    mkdir -p /out/modules; cp target/$PROFILE/geko /out/geko; \
     for m in $modules; do \
-      mkdir /out/modules/$m; cp target/release/geko-$m modules/geko-$m/module.toml /out/modules/$m/; \
+      mkdir /out/modules/$m; cp target/$PROFILE/geko-$m modules/geko-$m/module.toml /out/modules/$m/; \
     done
 
 FROM debian:bookworm-slim AS base
