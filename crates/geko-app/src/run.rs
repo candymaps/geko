@@ -47,7 +47,7 @@ struct Ticker {
 }
 
 impl Ticker {
-    const EVERY: Duration = Duration::from_secs(5);
+    const EVERY: Duration = Duration::from_secs(2);
 
     fn start(modules: &[Arc<dyn Module>]) -> Self {
         let module = Arc::new(AtomicUsize::new(0));

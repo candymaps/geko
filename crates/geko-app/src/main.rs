@@ -27,7 +27,7 @@ struct Cli {
     /// Comma-separated active modules; replaces the `[modules]` section.
     #[arg(long, global = true, value_delimiter = ',')]
     modules: Option<Vec<ModuleName>>,
-    /// Log every step of a build, instead of its progress every 5 seconds.
+    /// Log every step of a build, instead of its progress every 2 seconds.
     #[arg(long, global = true)]
     verbose: bool,
     #[command(subcommand)]
