@@ -26,6 +26,8 @@ pub struct Progress {
 
 struct Step {
     name: String,
+    /// What it is doing now, if it says so (`doing`).
+    doing: Option<String>,
     from: f32,
     to: f32,
 }
@@ -34,7 +36,6 @@ static STEP: Mutex<Option<Step>> = Mutex::new(None);
 static EXPECTED: AtomicU64 = AtomicU64::new(0);
 static DONE: AtomicU64 = AtomicU64::new(0);
 static BUILDING: AtomicBool = AtomicBool::new(false);
-static IN_BYTES: AtomicBool = AtomicBool::new(false);
 
 pub fn verbose() -> bool {
     static VERBOSE_SET: OnceLock<bool> = OnceLock::new();
@@ -62,30 +63,15 @@ impl Drop for Building {
 /// The build is now in `name`, which spans from `from` to `to` (0 to 1) of the whole.
 pub fn step(name: impl Into<String>, from: f32, to: f32) {
     let mut step = STEP.lock().unwrap_or_else(|e| e.into_inner());
-    IN_BYTES.store(false, Ordering::Relaxed);
     EXPECTED.store(0, Ordering::Relaxed);
     DONE.store(0, Ordering::Relaxed);
-    *step = Some(Step { name: name.into(), from, to });
+    *step = Some(Step { name: name.into(), doing: None, from, to });
 }
 
-/// As `step`, for one measured by the bytes downloaded (`expect_bytes`, `advance_bytes`), which
-/// the other steps leave out: they may read a little over the network too, counted otherwise.
-pub fn step_in_bytes(name: impl Into<String>, from: f32, to: f32) {
-    step(name, from, to);
-    IN_BYTES.store(true, Ordering::Relaxed);
-}
-
-/// A download has `bytes` more to read.
-pub fn expect_bytes(bytes: u64) {
-    if IN_BYTES.load(Ordering::Relaxed) {
-        expect(bytes);
-    }
-}
-
-/// A download read `bytes` more.
-pub fn advance_bytes(bytes: u64) {
-    if IN_BYTES.load(Ordering::Relaxed) {
-        advance(bytes);
+/// What the step is doing now, beside its name; `None` when it is done with it.
+pub fn doing(what: Option<String>) {
+    if let Some(step) = STEP.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+        step.doing = what;
     }
 }
 
@@ -99,13 +85,65 @@ pub fn advance(amount: u64) {
     DONE.fetch_add(amount, Ordering::Relaxed);
 }
 
+/// What the step has done so far.
+pub fn done() -> u64 {
+    DONE.load(Ordering::Relaxed)
+}
+
+/// The step has done at least `amount` (of what it expected so far): what an item that reports
+/// only part of its work with `advance` adds up to when it ends.
+pub fn reach(amount: u64) {
+    DONE.fetch_max(amount, Ordering::Relaxed);
+}
+
+/// What `path` takes on disk, with what is under it if a directory: of a sparse download, only what
+/// was fetched of it.
+pub fn disk_bytes(path: &std::path::Path) -> u64 {
+    let Ok(meta) = std::fs::symlink_metadata(path) else { return 0 };
+    if meta.is_dir() {
+        return std::fs::read_dir(path).map_or(0, |entries| entries.flatten().map(|e| disk_bytes(&e.path())).sum());
+    }
+    #[cfg(unix)]
+    return std::os::unix::fs::MetadataExt::blocks(&meta) * 512;
+    #[cfg(not(unix))]
+    meta.len()
+}
+
+/// A reader of an input of the step, whose bytes count as done; `passes` times over the input count
+/// once.
+pub struct Reading<R> {
+    inner: R,
+    passes: u64,
+    read: u64,
+}
+
+impl<R> Reading<R> {
+    pub fn new(inner: R, passes: u64) -> Self {
+        Self { inner, passes: passes.max(1), read: 0 }
+    }
+}
+
+impl<R: std::io::Read> std::io::Read for Reading<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        let before = self.read / self.passes;
+        self.read += n as u64;
+        advance(self.read / self.passes - before);
+        Ok(n)
+    }
+}
+
 /// Where the build of this process is; `None` outside a step.
 pub fn current() -> Option<Progress> {
     let step = STEP.lock().unwrap_or_else(|e| e.into_inner());
     let step = step.as_ref()?;
     let (expected, done) = (EXPECTED.load(Ordering::Relaxed), DONE.load(Ordering::Relaxed));
     let within = if expected == 0 { 0.0 } else { (done as f32 / expected as f32).min(1.0) };
-    Some(Progress { fraction: step.from + (step.to - step.from) * within, step: step.name.clone() })
+    let name = match &step.doing {
+        Some(doing) => format!("{}: {doing}", step.name),
+        None => step.name.clone(),
+    };
+    Some(Progress { fraction: step.from + (step.to - step.from) * within, step: name })
 }
 
 /// Whether to log an event: without `--verbose`, while a build runs, only warnings, errors and the

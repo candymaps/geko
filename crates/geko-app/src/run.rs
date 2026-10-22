@@ -57,16 +57,21 @@ impl Ticker {
         let (stop, stopped) = mpsc::channel::<()>();
         let (current, modules) = (Arc::clone(&module), modules.to_vec());
         std::thread::spawn(move || {
-            // A step that learns more of what it has to do (a download that starts) goes back a
-            // little: the line never does.
-            let mut shown = 0.0f32;
+            // Per module, not of the whole bundle: one that builds little (the skeleton of tiles)
+            // would weigh as much as the geocoder. A step that learns more of what it has to do
+            // goes back a little: the line never does.
+            let (mut module, mut shown) = (0, 0.0f32);
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(Self::EVERY) {
                 let i = current.load(Ordering::Relaxed);
+                if i != module {
+                    (module, shown) = (i, 0.0);
+                }
                 let name = modules[i].describe().name;
                 let p = modules[i].progress();
-                shown = shown.max((i as f32 + p.as_ref().map_or(0.0, |p| p.fraction)) / modules.len() as f32);
-                let step = p.map_or_else(|| name.to_string(), |p| format!("{name}: {}", p.step));
-                tracing::info!(target: progress::TARGET, "building the bundle: {:.0} % ({step})", shown * 100.0);
+                shown = shown.max(p.as_ref().map_or(0.0, |p| p.fraction));
+                let step = p.map_or_else(String::new, |p| format!(": {}", p.step));
+                let of = if modules.len() > 1 { format!(", module {} of {}", i + 1, modules.len()) } else { String::new() };
+                tracing::info!(target: progress::TARGET, "building the bundle: {name} {:.0} %{step}{of}", shown * 100.0);
             }
         });
         Self { module, stop: Some(stop) }
