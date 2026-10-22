@@ -199,7 +199,11 @@ fn main() -> anyhow::Result<()> {
     let path = config::config_path();
     let config = if path.exists() { Config::load(&path)? } else { Config::default() };
     let active = modules::resolve(&config, cli.modules.as_deref())?;
-    let opener = Arc::new(Opener::new(&config, &path, modules::linked(), modules::local()?));
+    let mut opener = Opener::new(&config, &path, modules::linked(), modules::local()?);
+    if std::env::var_os("GEKO_MODULES").is_some() {
+        opener = opener.without_downloads();
+    }
+    let opener = Arc::new(opener);
     let opened = active.iter().map(|name| opener.open(name)).collect::<geko_module_sdk::Result<Vec<_>>>()?;
     let modules: Vec<Arc<dyn Module>> = opened.iter().map(|o| Arc::clone(&o.module)).collect();
 

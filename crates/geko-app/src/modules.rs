@@ -2,7 +2,7 @@
 //! is, in this order: the package of `GEKO_MODULES` (never downloaded); the one linked in
 //! (`StaticModule`, behind its Cargo feature), unless `[modules.<module>] version` fixes another
 //! version; or the one downloaded from its registry (`store`), the newest of the contract of this
-//! geko or the version fixed. A package runs as a process of its own (`ProcessModule`) or is loaded
+//! geko or the version fixed, but never with `GEKO_MODULES`. A package runs as a process of its own (`ProcessModule`) or is loaded
 //! as a library (`DylibModule`), as its `module.toml` says.
 
 use std::path::{Path, PathBuf};
@@ -105,6 +105,9 @@ pub struct Opener {
     linked: Vec<(&'static str, Open)>,
     local: Vec<Local>,
     store: Store,
+    /// With `GEKO_MODULES`, a module neither in it nor linked in is an error, not a download: the
+    /// modules of a development build are those it was built with.
+    downloads: bool,
 }
 
 /// Starts the module of a package.
@@ -125,7 +128,11 @@ fn start(dir: &Path, package: &Package, context: Context) -> Result<Box<dyn Modu
 impl Opener {
     pub fn new(config: &Config, geko_toml: &Path, linked: Vec<(&'static str, Open)>, local: Vec<Local>) -> Self {
         let store = Store::new(&config.data.dir, config.data.offline);
-        Self { config: config.clone(), geko_toml: geko_toml.to_owned(), linked, local, store }
+        Self { config: config.clone(), geko_toml: geko_toml.to_owned(), linked, local, store, downloads: true }
+    }
+
+    pub fn without_downloads(self) -> Self {
+        Self { downloads: false, ..self }
     }
 
     pub fn store(&self) -> &Store {
@@ -171,6 +178,10 @@ impl Opener {
             && fixed.is_none_or(|v| v == LINKED_VERSION)
         {
             Opened { module: Arc::from(open(self.context(name)?)?), origin: Origin::Linked }
+        } else if !self.downloads {
+            return Err(GekoError::Config(format!(
+                "module `{name}` is active, but it is neither in GEKO_MODULES nor linked in, and with GEKO_MODULES it is not downloaded: build it too (make start-dev: DEV_MODULES=…,{name}) or disable it in [modules]"
+            )));
         } else {
             self.downloaded(name, fixed).map_err(|e| {
                 let linked = self.linked.iter().any(|(n, _)| *n == name.as_str());
@@ -295,6 +306,16 @@ mod tests {
         assert!(err.to_string().contains("version 99.0.0 is fixed") && err.to_string().contains("offline mode"), "{err}");
         let err = opener(vec![], "", data.path()).open(&name("tiles")).err().unwrap();
         assert!(err.to_string().contains("feature `tiles`"), "{err}");
+    }
+
+    #[test]
+    fn with_geko_modules_a_missing_module_is_an_error_not_a_download() {
+        let data = tempfile::tempdir().unwrap();
+        let ok: Open = |_| Ok(Box::new(Named("geocoder", CONTRACT)));
+        let o = opener(vec![("geocoder", ok)], "", data.path()).without_downloads();
+        assert_eq!(o.open(&name("geocoder")).unwrap().origin, Origin::Linked);
+        let err = o.open(&name("tiles")).err().unwrap().to_string();
+        assert!(err.contains("not downloaded") && err.contains("DEV_MODULES=…,tiles"), "{err}");
     }
 
     #[test]

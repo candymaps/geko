@@ -13,6 +13,9 @@
 # downloads and builds what the configuration asks for, and build again every [data] max_age_days,
 # without a restart. `serve` only serves what is already in /var/lib/geko or, with `[serve] bundles_url`, what another
 # machine published.
+#
+# The target `local` (develop/compose.yaml, `make start-dev`) is for development instead: geko and the
+# modules of MODULES, built from this same tree, in the image, so that it never downloads one.
 
 FROM rust:1.99.0-bookworm AS build
 WORKDIR /src
@@ -26,7 +29,28 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM scratch AS binary
 COPY --from=build /out/geko /geko
 
-FROM debian:bookworm-slim
+# geko and the modules of MODULES (comma-separated), each as a process of its own, as
+# GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
+# the bundles they build: <version>-<commit> from `make start-dev`.
+FROM rust:1.99.0-bookworm AS build-local
+ARG MODULES=geocoder
+ARG GEKO_MODULE_VERSION=
+WORKDIR /src
+COPY . .
+# An empty GEKO_MODULE_VERSION is unset: empty, it would be the version of the modules.
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=geko-target-local,target=/src/target \
+    set -e; \
+    [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
+    modules=$(echo "$MODULES" | tr ',' ' '); \
+    packages=; for m in $modules; do packages="$packages -p geko-module-$m --bin geko-$m"; done; \
+    cargo build --release --locked -p geko-app --no-default-features --bin geko $packages; \
+    mkdir -p /out/modules; cp target/release/geko /out/geko; \
+    for m in $modules; do \
+      mkdir /out/modules/$m; cp target/release/geko-$m modules/geko-$m/module.toml /out/modules/$m/; \
+    done
+
+FROM debian:bookworm-slim AS base
 # Links the image to its repository in GitHub's registry.
 LABEL org.opencontainers.image.source=https://github.com/candymaps/geko
 LABEL org.opencontainers.image.description="geko: geocoder with OSM and official national sources"
@@ -35,14 +59,7 @@ LABEL org.opencontainers.image.description="geko: geocoder with OSM and official
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
-COPY --from=binary /geko /usr/local/bin/geko
 COPY develop/geko.toml /etc/geko/geko.toml
-# The version of geko (that of Cargo.toml) and its commit, given by `make image` and the image
-# workflow. Last, so that a new version does not rebuild the layers above.
-ARG VERSION=unknown
-ARG REVISION=unknown
-LABEL org.opencontainers.image.version=$VERSION
-LABEL org.opencontainers.image.revision=$REVISION
 USER geko
 VOLUME /var/lib/geko
 EXPOSE 8080
@@ -52,3 +69,22 @@ ENTRYPOINT ["geko"]
 # On every interface whatever the listen of geko.toml says: inside a container, 127.0.0.1 is
 # reached from nowhere but the container itself.
 CMD ["up", "--listen", "0.0.0.0:8080"]
+
+FROM base AS local
+COPY --from=build-local /out/geko /usr/local/bin/geko
+COPY --from=build-local /out/modules /usr/lib/geko/modules
+ENV GEKO_MODULES=/usr/lib/geko/modules
+ARG VERSION=unknown
+ARG REVISION=unknown
+LABEL org.opencontainers.image.version=$VERSION
+LABEL org.opencontainers.image.revision=$REVISION
+
+# The image published, and that of `docker build` without a target: the last stage. The version of
+# geko (that of Cargo.toml) and its commit are given by `make image` and the image workflow, last,
+# so that a new version does not rebuild the layers above.
+FROM base
+COPY --from=binary /geko /usr/local/bin/geko
+ARG VERSION=unknown
+ARG REVISION=unknown
+LABEL org.opencontainers.image.version=$VERSION
+LABEL org.opencontainers.image.revision=$REVISION

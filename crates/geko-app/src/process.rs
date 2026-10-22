@@ -541,7 +541,16 @@ mod tests {
         let mut permissions = std::fs::metadata(&script).unwrap().permissions();
         std::os::unix::fs::PermissionsExt::set_mode(&mut permissions, 0o755);
         std::fs::set_permissions(&script, permissions).unwrap();
-        (start_with(script, context(), limits).unwrap(), dir)
+        // A test that starts a process while this one writes the script hands it the open file, and
+        // until that process execs, Linux refuses to run the script (ETXTBSY).
+        for _ in 0..20 {
+            match start_with(script.clone(), context(), limits) {
+                Ok(m) => return (m, dir),
+                Err(e) if e.to_string().contains("Text file busy") => std::thread::sleep(Duration::from_millis(50)),
+                Err(e) => panic!("{e}"),
+            }
+        }
+        panic!("the script of the module stayed busy");
     }
 
     /// The first answer to `body` that is not a 503, polling.
