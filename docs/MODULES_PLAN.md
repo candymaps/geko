@@ -50,7 +50,7 @@ Un cambio del módulo (ranking, formato del índice, fuente nueva, ruta nueva, o
 Cada módulo tiene su propio fichero, `/etc/geko/geko-<módulo>.toml` (`geko-geocoder.toml`), junto al `geko.toml`; con `GEKO_CONFIG`, se busca en la carpeta de ese fichero. `geko.toml` se queda solo con lo del host: qué módulos se activan y de dónde se bajan, el ámbito, las descargas, los bundles y el HTTP común.
 
 - El host lee el fichero del módulo solo si el módulo está activo (un módulo desactivado no abre ficheros) y se lo pasa sin interpretarlo. Si no existe, el módulo usa sus valores por defecto. Lo valida el módulo, con errores que nombran el fichero y la clave.
-- El ejemplo con todas las opciones y sus valores por defecto vive con el módulo (`modules/geko-geocoder/geko-geocoder.toml`, y después en su repositorio), y lo documenta él. `make install` lo copia a `/etc/geko/` si no hay ninguno, como hace con `geko.toml`.
+- El ejemplo con todas las opciones y sus valores por defecto vive con el módulo (`modules/geko-geocoder/geko-geocoder.toml` en el monorepo; hoy, `develop/geko-geocoder.toml` de su repositorio), y lo documenta él. `make install` lo copia a `/etc/geko/` si no hay ninguno, como hace con `geko.toml`.
 - Una opción nueva del geocoder no toca ni el host ni `geko.toml`.
 - Las opciones que afectan a la generación (las de las fuentes) entran en los sellos de las etapas del módulo, como hoy.
 

@@ -1,8 +1,8 @@
 # Configuration of `make start-dev` (develop/compose.yaml), and of `make install` the first time:
 # development only. The published image carries none: it is mounted at /etc/geko/geko.toml.
 # The options of the geocoder (its sources, time budgets, cache…) go in
-# /etc/geko/geko-geocoder.toml, beside it (modules/geko-geocoder/geko-geocoder.toml in the repository of
-# the geocoder lists them all); without it, every default.
+# /etc/geko/geko-geocoder.toml, beside it (develop/geko-geocoder.toml in the repository of the
+# geocoder lists them all); without it, every default.
 
 [modules]
 geocoder = true
