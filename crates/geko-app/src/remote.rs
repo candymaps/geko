@@ -168,7 +168,7 @@ pub mod tests {
 
     use super::*;
     use geko_module_sdk::bundle::{BundleManifest, BundleModule, FORMAT};
-    use geko_module_sdk::module::{CONTRACT, Context, DataPolicy, Method, ModuleName, Route};
+    use geko_module_sdk::module::{CONTRACT, CommandInfo, Context, DataPolicy, Method, ModuleName, Route};
     use geko_module_sdk::scope::Scope;
 
     #[derive(Default)]
@@ -185,7 +185,7 @@ pub mod tests {
                 routes: vec![Route { method: Method::Post, path: "v1/echo".into(), pool: true, public: false }],
                 openapi: None,
                 attribution: None,
-                commands: vec![],
+                commands: vec![CommandInfo { name: "query".into(), about: "echoes its arguments".into() }],
             }
         }
 
@@ -221,8 +221,16 @@ pub mod tests {
         }
 
         fn command(&self, name: &str, args: &[String]) -> Result<String> {
+            if name != "query" {
+                return Err(GekoError::Config(format!("unknown command `{name}`")));
+            }
             Ok(format!("{name} {}", args.join(" ")))
         }
+    }
+
+    #[test]
+    fn the_fake_keeps_the_contract_linked_in() {
+        geko_module_sdk::conformance::module::check(&Fake::default());
     }
 
     pub fn open_fake(_: Context) -> Result<Box<dyn Module>> {

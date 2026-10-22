@@ -36,4 +36,5 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+geko-module-sdk = { workspace = true, features = ["conformance"] }
 tempfile = "3"

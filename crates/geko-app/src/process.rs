@@ -493,6 +493,11 @@ mod tests {
     }
 
     #[test]
+    fn the_contract_crosses_the_socket() {
+        geko_module_sdk::conformance::module::check(&connected(open_fake));
+    }
+
+    #[test]
     fn requests_are_answered_at_once() {
         crate::remote::tests::answered_at_once(Arc::new(connected(open_fake)));
     }

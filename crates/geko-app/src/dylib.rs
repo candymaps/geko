@@ -142,6 +142,11 @@ mod tests {
     }
 
     #[test]
+    fn the_contract_crosses_the_boundary() {
+        geko_module_sdk::conformance::module::check(&open(functions(), context()).unwrap());
+    }
+
+    #[test]
     fn requests_are_answered_at_once() {
         crate::remote::tests::answered_at_once(Arc::new(open(functions(), context()).unwrap()));
     }
