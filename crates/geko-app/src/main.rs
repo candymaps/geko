@@ -207,7 +207,13 @@ fn main() -> anyhow::Result<()> {
         .init();
 
     let path = config::config_path();
-    let config = if path.exists() { Config::load(&path)? } else { Config::default() };
+    anyhow::ensure!(
+        path.exists(),
+        "no configuration at {}: write one (README, «Configuration reference»), or name another with GEKO_CONFIG; in Docker, mount it at {}",
+        path.display(),
+        config::CONFIG_PATH
+    );
+    let config = Config::load(&path)?;
     let active = modules::resolve(&config, cli.modules.as_deref())?;
     let mut opener = Opener::new(&config, &path, modules::linked(), modules::local()?);
     if std::env::var_os("GEKO_MODULES").is_some() {

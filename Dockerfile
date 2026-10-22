@@ -64,7 +64,6 @@ LABEL org.opencontainers.image.description="geko: geocoder with OSM and official
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
-COPY develop/geko.toml /etc/geko/geko.toml
 USER geko
 VOLUME /var/lib/geko
 EXPOSE 8080

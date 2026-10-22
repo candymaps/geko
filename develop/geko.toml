@@ -1,5 +1,5 @@
-# Sample configuration of the geko image. Replace it with your own, mounted at
-# /etc/geko/geko.toml: the countries (and regions) to serve, and the licences of their sources.
+# Configuration of `make start-dev` (develop/compose.yaml), and of `make install` the first time:
+# development only. The published image carries none: it is mounted at /etc/geko/geko.toml.
 # The options of the geocoder (its sources, time budgets, cache…) go in
 # /etc/geko/geko-geocoder.toml, beside it (modules/geko-geocoder/geko-geocoder.toml in the
 # repository lists them all); without it, every default.
@@ -9,12 +9,15 @@ geocoder = true
 tiles    = false
 
 [[scope]]
-country = "LU"          # ISO 3166-1; regions = ["ES-PM"] narrows a country to some regions
+country = "ES"          # ISO 3166-1; regions = ["ES-PM"] narrows a country to some regions
+regions = ["ES-PM"]
 
 [data]
-# Downloading needs your acceptance of the licences of the sources (ODbL for OpenStreetMap,
-# CDLA-Permissive for Overture, those of the national sources): set it to true.
-accept_licenses = false
+# Accepted for development: the licences of the sources (ODbL for OpenStreetMap, CDLA-Permissive
+# for Overture, those of the national sources). The downloads are kept, so that a staging done
+# again does not download them again.
+accept_licenses = true
+keep_downloads  = true
 
 # The image serves on 0.0.0.0:8080 whatever [serve] listen says (the command of the Dockerfile).
 [serve]
