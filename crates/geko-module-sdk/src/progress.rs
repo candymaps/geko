@@ -69,6 +69,8 @@ static EXPECTED: AtomicU64 = AtomicU64::new(0);
 static DONE: AtomicU64 = AtomicU64::new(0);
 static BUILDING: AtomicBool = AtomicBool::new(false);
 static NEXT_WORK: AtomicU64 = AtomicU64::new(0);
+/// The module that builds, which the progress line names.
+static MODULE: Mutex<String> = Mutex::new(String::new());
 
 fn locked() -> std::sync::MutexGuard<'static, Option<Step>> {
     STEP.lock().unwrap_or_else(|e| e.into_inner())
@@ -93,16 +95,54 @@ impl Building {
 impl Drop for Building {
     fn drop(&mut self) {
         BUILDING.store(false, Ordering::Relaxed);
+        // A build that failed: its step never reached 100 %.
         *locked() = None;
     }
 }
 
-/// The build is now in step `number` of `steps`, `name`, counted in `unit`.
+/// The module that builds from now on, which the progress line names.
+pub fn module(name: impl Into<String>) {
+    *MODULE.lock().unwrap_or_else(|e| e.into_inner()) = name.into();
+}
+
+/// Logs the progress line of `progress`, without `--verbose`.
+pub fn log(progress: &Progress) {
+    if !verbose() {
+        let module = MODULE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        tracing::info!(target: TARGET, "building the bundle: {module}, {progress}");
+    }
+}
+
+/// The build is now in step `number` of `steps`, `name`, counted in `unit`. The step before, if
+/// any, ends: each one logs its line at 0 % when it starts and at 100 % when it ends, however
+/// short, beside those of the host every few seconds.
 pub fn step(name: impl Into<String>, number: u32, steps: u32, unit: Unit) {
     let mut step = locked();
+    if let Some(before) = step.as_ref() {
+        log(&ended(before));
+    }
     EXPECTED.store(0, Ordering::Relaxed);
     DONE.store(0, Ordering::Relaxed);
-    *step = Some(Step { name: name.into(), number, steps, unit, on: Vec::new() });
+    let started = Step { name: name.into(), number, steps, unit, on: Vec::new() };
+    log(&Progress { done: 0, expected: 1, unit: Unit::Share, ..snapshot(&started) });
+    *step = Some(started);
+}
+
+/// The last step ends: the build of the module is over.
+pub fn end() {
+    let last = locked().take();
+    if let Some(last) = last {
+        log(&ended(&last));
+    }
+}
+
+/// A step at its end: all it expected done, or 100 % if it counted nothing.
+fn ended(step: &Step) -> Progress {
+    let p = snapshot(step);
+    match p.expected {
+        0 => Progress { done: 1, expected: 1, unit: Unit::Share, ..p },
+        expected => Progress { done: expected, ..p },
+    }
 }
 
 /// While it lives, the step is working on `what` (a source being downloaded), which the line names.
@@ -187,21 +227,23 @@ impl<R: std::io::Read> std::io::Read for Reading<R> {
 
 /// Where the build of this process is; `None` outside a step.
 pub fn current() -> Option<Progress> {
-    let step = locked();
-    let step = step.as_ref()?;
+    locked().as_ref().map(snapshot)
+}
+
+fn snapshot(step: &Step) -> Progress {
     let name = if step.on.is_empty() {
         step.name.clone()
     } else {
         format!("{} {}", step.name, step.on.iter().map(|(_, w)| w.as_str()).collect::<Vec<_>>().join(", "))
     };
-    Some(Progress {
+    Progress {
         step: name,
         number: step.number,
         steps: step.steps,
         done: DONE.load(Ordering::Relaxed),
         expected: EXPECTED.load(Ordering::Relaxed),
         unit: step.unit,
-    })
+    }
 }
 
 /// Whether to log an event: without `--verbose`, while a build runs, only warnings, errors and the

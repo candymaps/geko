@@ -61,11 +61,8 @@ impl Ticker {
             // one step against another, which nothing measures.
             while let Err(mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(Self::EVERY) {
                 let i = current.load(Ordering::Relaxed);
-                let name = modules[i].describe().name;
-                let of = if modules.len() > 1 { format!(" (module {} of {})", i + 1, modules.len()) } else { String::new() };
-                match modules[i].progress() {
-                    Some(p) => tracing::info!(target: progress::TARGET, "building the bundle: {name}{of}, {p}"),
-                    None => tracing::info!(target: progress::TARGET, "building the bundle: {name}{of}"),
+                if let Some(p) = modules[i].progress() {
+                    progress::log(&p);
                 }
             }
         });
@@ -91,7 +88,12 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
     let ticker = Ticker::start(modules);
     for (i, m) in modules.iter().enumerate() {
         ticker.module.store(i, Ordering::Relaxed);
-        let built = m.build(force, refresh)?;
+        progress::module(m.describe().name.to_string());
+        let built = m.build(force, refresh);
+        if built.is_ok() {
+            progress::end();
+        }
+        let built = built?;
         out.push_str(&built.report);
         stages.extend(built.stages);
         extra.extend(built.report_extra);

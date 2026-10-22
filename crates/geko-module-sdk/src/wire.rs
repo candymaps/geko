@@ -144,7 +144,10 @@ pub(crate) fn answer(module: &dyn Module, call: Call, payload: Vec<u8>) -> (Repl
             Call::Ready => (json(&module.ready()?), Vec::new()),
             Call::Build { force, refresh } => {
                 let _building = crate::progress::Building::start();
-                (json(&module.build(force, refresh)?), Vec::new())
+                crate::progress::module(module.describe().name.to_string());
+                let built = module.build(force, refresh)?;
+                crate::progress::end();
+                (json(&built), Vec::new())
             }
             Call::Progress => (json(&module.progress()), Vec::new()),
             Call::Published => (json(&module.published()?), Vec::new()),
