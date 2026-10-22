@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use axum::body::Bytes;
 use axum::extract::{Query, RawPathParams};
 use axum::http::{HeaderMap, StatusCode, header};
@@ -21,21 +21,67 @@ use axum::routing::{MethodRouter, get, post};
 use axum::{Json, Router};
 use geko_module_sdk::Result;
 use geko_module_sdk::bundle::{BundleManifest, LicenseNotice, current_version};
-use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Request};
+use geko_module_sdk::module::{self, BundleView, Description, Method, Module, ModuleName, Request};
 use serde_json::json;
 
 pub use access::Access;
+
+/// The module behind a mount, which a bundle built by another version of it switches to that
+/// version (`Reopen`); requests in flight finish on the one they started on.
+struct Slot {
+    current: ArcSwap<(Arc<dyn Module>, String)>,
+}
+
+impl Slot {
+    fn module(&self) -> Arc<dyn Module> {
+        Arc::clone(&self.current.load().0)
+    }
+
+    fn version(&self) -> String {
+        self.current.load().1.clone()
+    }
+
+    fn switch(&self, module: Arc<dyn Module>) {
+        let version = module.describe().version;
+        self.current.store(Arc::new((module, version)));
+    }
+}
+
+impl Module for Slot {
+    fn describe(&self) -> Description {
+        self.module().describe()
+    }
+
+    fn load(&self, bundle: &BundleView) -> Result<()> {
+        self.module().load(bundle)
+    }
+
+    fn handle(&self, request: Request) -> module::Response {
+        self.module().handle(request)
+    }
+
+    fn metrics(&self, out: &mut String) {
+        self.module().metrics(out)
+    }
+
+    fn shutdown(&self) -> Result<()> {
+        self.module().shutdown()
+    }
+}
 
 /// An active module and what it said it is.
 #[derive(Clone)]
 pub struct Mounted {
     pub module: Arc<dyn Module>,
     pub description: Description,
+    slot: Arc<Slot>,
 }
 
 impl Mounted {
     pub fn new(module: Arc<dyn Module>) -> Self {
-        Self { description: module.describe(), module }
+        let description = module.describe();
+        let slot = Arc::new(Slot { current: ArcSwap::from_pointee((module, description.version.clone())) });
+        Self { module: Arc::clone(&slot) as Arc<dyn Module>, description, slot }
     }
 
     fn name(&self) -> &str {
@@ -52,12 +98,17 @@ impl Mounted {
 /// on another machine and published where this one pulls them from.
 pub type Pull = Arc<dyn Fn() -> Result<()> + Send + Sync>;
 
+/// The module `name` of the version a bundle was built by, to serve that bundle with it; `None`
+/// keeps the one in service (a module linked in, or one of `GEKO_MODULES`).
+pub type Reopen = Arc<dyn Fn(&ModuleName, &str) -> Result<Option<Arc<dyn Module>>> + Send + Sync>;
+
 #[derive(Clone)]
 pub struct BundleSource {
     pub dir: PathBuf,
     /// How often to look for a new `current` version.
     pub reload: Duration,
     pub pull: Option<Pull>,
+    pub reopen: Option<Reopen>,
 }
 
 /// Loads the `current` bundle into every module and keeps watching for new versions.
@@ -65,11 +116,17 @@ pub struct BundleManager {
     source: BundleSource,
     modules: Vec<Mounted>,
     loaded: ArcSwapOption<(String, Vec<LicenseNotice>)>,
+    /// Why the last bundle published could not be loaded, for `/health`.
+    error: ArcSwapOption<String>,
 }
 
 impl BundleManager {
     pub fn new(source: BundleSource, modules: Vec<Mounted>) -> Self {
-        Self { source, modules, loaded: ArcSwapOption::empty() }
+        Self { source, modules, loaded: ArcSwapOption::empty(), error: ArcSwapOption::empty() }
+    }
+
+    pub fn error(&self) -> Option<String> {
+        self.error.load_full().map(|e| (*e).clone())
     }
 
     pub fn version(&self) -> Option<String> {
@@ -82,8 +139,18 @@ impl BundleManager {
     }
 
     /// Loads `current` if it differs from the loaded version, into every module that has a part
-    /// of it. On error the previous bundle stays in service.
+    /// of it, switching a module to the version that built its part when that is another. On
+    /// error the previous bundle stays in service.
     pub fn refresh(&self) -> Result<bool> {
+        let refreshed = self.load_current();
+        match &refreshed {
+            Ok(_) => self.error.store(None),
+            Err(e) => self.error.store(Some(Arc::new(e.to_string()))),
+        }
+        refreshed
+    }
+
+    fn load_current(&self) -> Result<bool> {
         if let Some(pull) = &self.source.pull
             && let Err(e) = pull()
         {
@@ -109,10 +176,22 @@ impl BundleManager {
                     m.description.contract
                 )));
             }
-            if part.version != m.description.version {
-                tracing::warn!(module = m.name(), built_by = part.version, serving = m.description.version, "the bundle was built by another version of the module");
+            let view = BundleView { root: root.clone(), manifest: manifest.clone(), module: part.clone() };
+            let serving = m.slot.version();
+            if part.version != serving {
+                let reopened = match &self.source.reopen {
+                    Some(reopen) => reopen(&m.description.name, &part.version)?,
+                    None => None,
+                };
+                if let Some(module) = reopened {
+                    module.load(&view)?;
+                    m.slot.switch(module);
+                    tracing::info!(module = m.name(), from = serving, to = part.version, "switched to the version of the module that built the bundle");
+                    continue;
+                }
+                tracing::warn!(module = m.name(), built_by = part.version, serving, "the bundle was built by another version of the module");
             }
-            m.module.load(&BundleView { root: root.clone(), manifest: manifest.clone(), module: part.clone() })?;
+            m.module.load(&view)?;
         }
         tracing::info!(%version, elapsed = ?started.elapsed(), "bundle loaded");
         self.loaded.store(Some(Arc::new((version, manifest.licenses))));
@@ -270,12 +349,14 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
         move || bundles.as_ref().and_then(|b| b.version())
     };
     let health_version = version.clone();
+    let health_bundles = bundles.clone();
     let health = Router::new().route(
         "/health",
         get(move || {
             let names = names.clone();
             let version = health_version();
-            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version })) }
+            let error = health_bundles.as_ref().and_then(|b| b.error());
+            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error })) }
         }),
     );
     let tracked = health.merge(module_routes(modules)).route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
@@ -356,6 +437,8 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         loaded: Mutex<Vec<String>>,
+        /// "1.0.0" when empty.
+        version: &'static str,
     }
 
     impl Module for Fake {
@@ -363,7 +446,7 @@ mod tests {
             let route = |method, path: &str, pool, public| Route { method, path: path.into(), pool, public };
             Description {
                 name: ModuleName::new("fake").unwrap(),
-                version: "1.0.0".into(),
+                version: if self.version.is_empty() { "1.0.0" } else { self.version }.into(),
                 contract: module::CONTRACT,
                 routes: vec![
                     route(Method::Get, "", false, true),
@@ -443,9 +526,14 @@ mod tests {
     }
 
     fn publish(dir: &std::path::Path, version: &str, contract: u32) {
+        publish_by(dir, version, contract, "1.0.0");
+    }
+
+    /// Publishes `version` with the part of the fake module built by its version `by`.
+    fn publish_by(dir: &std::path::Path, version: &str, contract: u32, by: &str) {
         let root = dir.join(version);
         std::fs::create_dir_all(&root).unwrap();
-        let part = BundleModule { name: ModuleName::new("fake").unwrap(), version: "1.0.0".into(), contract, meta: json!({ "n": version }) };
+        let part = BundleModule { name: ModuleName::new("fake").unwrap(), version: by.into(), contract, meta: json!({ "n": version }) };
         BundleManifest { format: FORMAT, version: version.into(), created_unix: 0, modules: vec![part], licenses: vec![], artifacts: vec![] }
             .write(&root)
             .unwrap();
@@ -457,7 +545,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(Fake::default());
         let manager = BundleManager::new(
-            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None },
+            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: None },
             vec![Mounted::new(fake.clone())],
         );
         assert!(!manager.refresh().unwrap(), "nothing published yet");
@@ -472,5 +560,28 @@ mod tests {
         let err = manager.refresh().unwrap_err().to_string();
         assert!(err.contains("contract"), "{err}");
         assert_eq!(manager.version().as_deref(), Some("v2"), "the previous one stays");
+        assert!(manager.error().is_some_and(|e| e.contains("contract")), "and /health says why");
+    }
+
+    #[tokio::test]
+    async fn a_bundle_of_another_version_of_the_module_switches_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let newer = Arc::new(Fake { version: "2.0.0", ..Default::default() });
+        let given = Arc::clone(&newer);
+        let reopen: Reopen = Arc::new(move |name, version| {
+            assert_eq!((name.as_str(), version), ("fake", "2.0.0"));
+            Ok(Some(Arc::clone(&given) as Arc<dyn Module>))
+        });
+        let mounted = Mounted::new(Arc::new(Fake::default()));
+        let manager = Arc::new(BundleManager::new(
+            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: Some(reopen) },
+            vec![mounted.clone()],
+        ));
+        publish_by(dir.path(), "v1", module::CONTRACT, "2.0.0");
+        assert!(manager.refresh().unwrap());
+        assert_eq!(*newer.loaded.lock().unwrap(), [r#"v1 "v1""#], "the new version loaded the bundle");
+        assert_eq!(mounted.module.describe().version, "2.0.0");
+        let app = router(&[mounted], Some(manager), Access::default(), None);
+        assert_eq!(get_json(&app, "/fake/v1/echo/x").await.0, StatusCode::OK, "and serves its routes");
     }
 }

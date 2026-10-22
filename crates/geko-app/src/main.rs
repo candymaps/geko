@@ -6,6 +6,7 @@ mod modules;
 mod process;
 mod remote;
 mod run;
+mod store;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,6 +16,7 @@ use clap::{Parser, Subcommand};
 use geko_module_sdk::module::{Module, ModuleName};
 
 use crate::config::Config;
+use crate::modules::{Opened, Opener, Origin};
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -96,10 +98,19 @@ enum Purge {
         #[arg(long)]
         all: bool,
     },
+    /// The downloaded versions of the modules that neither the configuration nor any bundle kept
+    /// needs.
+    Modules,
 }
 
-fn serve(config: &Config, modules: &[Arc<dyn Module>], listen: Option<SocketAddr>) -> anyhow::Result<()> {
-    let mounted = modules.iter().map(|m| geko_server::Mounted::new(Arc::clone(m))).collect();
+fn serve(config: &Config, opener: &Arc<Opener>, opened: &[Opened], listen: Option<SocketAddr>) -> anyhow::Result<()> {
+    let mounted = opened.iter().map(|o| geko_server::Mounted::new(Arc::clone(&o.module))).collect();
+    let origins: Vec<(ModuleName, Origin)> = opened.iter().map(|o| (o.module.describe().name, o.origin.clone())).collect();
+    let reopener = Arc::clone(opener);
+    let reopen: geko_server::Reopen = Arc::new(move |name, version| {
+        let Some((_, origin)) = origins.iter().find(|(n, _)| n == name) else { return Ok(None) };
+        reopener.reopen(name, version, origin)
+    });
     let pull = (!config.serve.bundles_url.is_empty()).then(|| {
         let (url, dir, keep) = (config.serve.bundles_url.clone(), config.bundles_dir(), config.build.keep);
         // Bundles are not sources: a serving machine pulls them even when it never downloads data.
@@ -116,6 +127,7 @@ fn serve(config: &Config, modules: &[Arc<dyn Module>], listen: Option<SocketAddr
         dir: config.bundles_dir(),
         reload: std::time::Duration::from_secs(config.serve.reload_secs.max(1)),
         pull,
+        reopen: Some(reopen),
     };
     let addr = listen.unwrap_or(config.serve.listen);
     let s = &config.serve;
@@ -145,6 +157,20 @@ fn purge(modules: &[Arc<dyn Module>], what: geko_module_sdk::module::Purge) -> a
     Ok(())
 }
 
+/// The (module, version) pairs still needed: those of the active modules and those that built a
+/// part of a bundle kept.
+fn modules_in_use(config: &Config, modules: &[Arc<dyn Module>]) -> Vec<(String, String)> {
+    let mut used: Vec<(String, String)> = modules.iter().map(|m| m.describe()).map(|d| (d.name.to_string(), d.version)).collect();
+    if let Ok(entries) = std::fs::read_dir(config.bundles_dir()) {
+        for dir in entries.filter_map(|e| e.ok().map(|e| e.path())) {
+            if let Ok(manifest) = geko_module_sdk::bundle::BundleManifest::read(&dir) {
+                used.extend(manifest.modules.into_iter().map(|m| (m.name.to_string(), m.version)));
+            }
+        }
+    }
+    used
+}
+
 /// `geko <module> <command> …`: a command of an active module.
 fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Result<()> {
     let [name, rest @ ..] = args else { unreachable!("clap gives the name of the subcommand") };
@@ -172,15 +198,18 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let path = config::config_path();
     let config = if path.exists() { Config::load(&path)? } else { Config::default() };
-    let linked = modules::linked();
-    let local = modules::local()?;
-    let active = modules::resolve(&config, cli.modules.as_deref(), &linked, &local)?;
-    let modules = modules::open(&config, &path, &active, &linked, &local)?;
+    let active = modules::resolve(&config, cli.modules.as_deref())?;
+    let opener = Arc::new(Opener::new(&config, &path, modules::linked(), modules::local()?));
+    let opened = active.iter().map(|name| opener.open(name)).collect::<geko_module_sdk::Result<Vec<_>>>()?;
+    let modules: Vec<Arc<dyn Module>> = opened.iter().map(|o| Arc::clone(&o.module)).collect();
 
     match cli.command {
         Command::Plan => {
-            let names: Vec<_> = active.iter().map(|m| m.as_str()).collect();
-            println!("Modules: {}", names.join(", "));
+            println!("Modules (contract {}):", geko_module_sdk::module::CONTRACT);
+            for o in &opened {
+                let d = o.module.describe();
+                println!("  {} {}: {}", d.name, d.version, o.origin);
+            }
             prepare(&modules)?;
             for m in &modules {
                 print!("{}", m.plan()?);
@@ -199,7 +228,7 @@ fn main() -> anyhow::Result<()> {
             }
             print!("{}", run::build(&config, &modules, force, refresh)?);
         }
-        Command::Serve { listen } => serve(&config, &modules, listen)?,
+        Command::Serve { listen } => serve(&config, &opener, &opened, listen)?,
         Command::Up { force, purge: first_purge, refresh, listen } => {
             prepare(&modules)?;
             if first_purge {
@@ -211,7 +240,7 @@ fn main() -> anyhow::Result<()> {
             }
             let (builder, background) = (config.clone(), modules.clone());
             std::thread::Builder::new().name("geko-build".into()).spawn(move || run::regenerate(&builder, &background, force, refresh))?;
-            serve(&config, &modules, listen)?;
+            serve(&config, &opener, &opened, listen)?;
         }
         Command::Purge { what } => {
             if matches!(what, None | Some(Purge::Data)) {
@@ -221,6 +250,11 @@ fn main() -> anyhow::Result<()> {
             if let None | Some(Purge::Packages { .. }) = what {
                 let all = matches!(what, Some(Purge::Packages { all: true }));
                 purge(&modules, geko_module_sdk::module::Purge::Packages { all })?;
+            }
+            if let None | Some(Purge::Modules) = what {
+                for dir in opener.store().purge(&modules_in_use(&config, &modules))? {
+                    println!("purged {}", dir.display());
+                }
             }
         }
         Command::Module(args) => module_command(&modules, &args)?,

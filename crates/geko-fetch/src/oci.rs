@@ -61,6 +61,8 @@ pub struct Artifact {
 #[derive(Deserialize)]
 struct Manifest {
     layers: Vec<Layer>,
+    #[serde(default)]
+    annotations: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +96,14 @@ impl OciClient {
     /// for an anonymous client: missing, or not public.
     pub fn digest(&self, reference: &Reference) -> Result<Option<String>> {
         Ok(self.manifest(reference)?.map(|(digest, _, _)| digest))
+    }
+
+    /// The digest of the manifest of `reference` and its annotations (`oras push --annotation`),
+    /// read without downloading any file; None as for `digest`.
+    pub fn annotations(&self, reference: &Reference) -> Result<Option<(String, HashMap<String, String>)>> {
+        let Some((digest, body, _)) = self.manifest(reference)? else { return Ok(None) };
+        let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| GekoError::Data(format!("{reference}: invalid manifest: {e}")))?;
+        Ok(Some((digest, manifest.annotations)))
     }
 
     /// The artifact, or None as for `digest`. Every file is checked against its digest.
@@ -241,7 +251,7 @@ mod tests {
             .iter()
             .map(|(name, bytes)| format!(r#"{{"mediaType":"application/octet-stream","digest":"{}","size":{},"annotations":{{"{TITLE}":"{name}"}}}}"#, digest(bytes), bytes.len()))
             .collect();
-        let manifest = format!(r#"{{"schemaVersion":2,"layers":[{}]}}"#, layers.join(","));
+        let manifest = format!(r#"{{"schemaVersion":2,"layers":[{}],"annotations":{{"geko.version":"1.2.0"}}}}"#, layers.join(","));
         let blobs: HashMap<String, Vec<u8>> = files
             .iter()
             .map(|(_, bytes)| (digest(bytes), if tamper { b"other".to_vec() } else { bytes.to_vec() }))
@@ -296,6 +306,8 @@ mod tests {
         let artifact = client.pull(&reference).unwrap().unwrap();
         assert_eq!(artifact.files, files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect::<Vec<_>>());
         assert_eq!(client.digest(&reference).unwrap().as_deref(), Some(artifact.digest.as_str()));
+        let (digest, annotations) = client.annotations(&reference).unwrap().unwrap();
+        assert_eq!((digest.as_str(), annotations["geko.version"].as_str()), (artifact.digest.as_str(), "1.2.0"));
 
         let missing = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-9")).unwrap();
         assert_eq!(client.pull(&missing).unwrap(), None);

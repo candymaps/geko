@@ -37,6 +37,10 @@ pub struct ModuleTable {
     pub enabled: bool,
     /// Its file of configuration, relative to `geko.toml`; `geko-<module>.toml` beside it by default.
     pub config: Option<PathBuf>,
+    /// The version to download and build with, instead of the newest of the contract of this geko.
+    pub version: Option<String>,
+    /// Where it is downloaded from; `ghcr.io/candymaps/geko-<module>` by default.
+    pub registry: Option<String>,
 }
 
 fn yes() -> bool {
@@ -55,6 +59,13 @@ impl ModuleEntry {
         match self {
             ModuleEntry::Enabled(_) => None,
             ModuleEntry::Table(t) => t.config.as_deref(),
+        }
+    }
+
+    fn table(&self) -> Option<&ModuleTable> {
+        match self {
+            ModuleEntry::Enabled(_) => None,
+            ModuleEntry::Table(t) => Some(t),
         }
     }
 }
@@ -256,6 +267,16 @@ impl Config {
         }
     }
 
+    /// `[modules.<module>] version`.
+    pub fn module_version(&self, module: &ModuleName) -> Option<&str> {
+        self.modules.get(module.as_str()).and_then(ModuleEntry::table).and_then(|t| t.version.as_deref())
+    }
+
+    /// `[modules.<module>] registry`.
+    pub fn module_registry(&self, module: &ModuleName) -> Option<&str> {
+        self.modules.get(module.as_str()).and_then(ModuleEntry::table).and_then(|t| t.registry.as_deref())
+    }
+
     /// Where bundles are published and served from.
     pub fn bundles_dir(&self) -> PathBuf {
         self.data.dir.join("bundles")
@@ -293,6 +314,9 @@ mod tests {
         assert_eq!(c.module_config(&geocoder, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/exact.toml"));
         let tiles = ModuleName::new("tiles").unwrap();
         assert_eq!(c.module_config(&tiles, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/geko-tiles.toml"));
+        assert_eq!((c.module_version(&geocoder), c.module_registry(&geocoder)), (None, None));
+        let c = Config::parse("[modules.geocoder]\nversion = \"1.4.2\"\nregistry = \"ghcr.io/me/geko-geocoder\"\n").unwrap();
+        assert_eq!((c.module_version(&geocoder), c.module_registry(&geocoder)), (Some("1.4.2"), Some("ghcr.io/me/geko-geocoder")));
         assert!(Config::parse("[modules.geocoder]\nconfg = \"x\"\n").is_err());
         assert!(Config::parse("[modules]\nGeocoder = true\n").is_err());
     }

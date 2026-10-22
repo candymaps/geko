@@ -16,6 +16,7 @@ geocoder = ["dep:geko-module-geocoder"]
 tiles = ["dep:geko-module-tiles"]
 
 [dependencies]
+geko-artifact.workspace = true
 geko-module-sdk.workspace = true
 geko-server.workspace = true
 geko-fetch.workspace = true
