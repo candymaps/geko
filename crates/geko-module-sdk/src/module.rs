@@ -239,11 +239,19 @@ pub struct Response {
     pub status: u16,
     pub content_type: String,
     pub body: Vec<u8>,
+    /// Other headers, such as `Retry-After`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub headers: Vec<(String, String)>,
 }
 
 impl Response {
     pub fn new(status: u16, content_type: &str, body: impl Into<Vec<u8>>) -> Self {
-        Self { status, content_type: content_type.to_owned(), body: body.into() }
+        Self { status, content_type: content_type.to_owned(), body: body.into(), headers: Vec::new() }
+    }
+
+    pub fn with_header(mut self, name: &str, value: impl Into<String>) -> Self {
+        self.headers.push((name.to_owned(), value.into()));
+        self
     }
 
     /// `{"error": message}`, as every route of geko answers an error.
@@ -322,6 +330,13 @@ pub trait Module: Send + Sync {
 
     fn shutdown(&self) -> Result<()> {
         Ok(())
+    }
+
+    /// Why the module cannot answer now, if it cannot: the host's side of a module that is not
+    /// linked in (its process exited and is starting again, or failed too often), which `/health`
+    /// reports. It never reaches the module itself.
+    fn unavailable(&self) -> Option<String> {
+        None
     }
 
     /// Runs one of its commands (`Description::commands`) and returns what it prints.

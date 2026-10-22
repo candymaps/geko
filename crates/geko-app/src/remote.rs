@@ -12,9 +12,34 @@ use serde::de::DeserializeOwned;
 /// What the module answered to a call, and the payload of the answer.
 pub type Answer = Result<(serde_json::Value, Vec<u8>)>;
 
+/// A call that the channel did not carry to the module, and how its request is answered instead.
+#[derive(Debug)]
+pub struct Refused {
+    pub status: u16,
+    pub message: String,
+    pub retry_after: Option<Duration>,
+}
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+pub fn refused(status: u16, message: String, retry_after: Option<Duration>) -> GekoError {
+    GekoError::Other(Box::new(Refused { status, message, retry_after }))
+}
+
 /// How the calls reach a module.
 pub trait Channel: Send + Sync {
     fn exchange(&self, call: &Call, payload: &[u8]) -> Answer;
+
+    /// Why the module cannot answer now (`Module::unavailable`).
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
 
     /// After the module loaded `bundle`.
     fn loaded(&self, bundle: &BundleView) {
@@ -96,8 +121,20 @@ impl<C: Channel> Module for Remote<C> {
         let answer = self.channel.exchange(&Call::Handle(request), &body);
         match answer.and_then(|(value, body)| Ok(Response { body, ..decode(value)? })) {
             Ok(response) => response,
+            Err(GekoError::Other(e)) if e.is::<Refused>() => {
+                let r = e.downcast_ref::<Refused>().expect("checked");
+                let response = Response::error(r.status, &r.message);
+                match r.retry_after {
+                    Some(after) => response.with_header("retry-after", after.as_secs().max(1).to_string()),
+                    None => response,
+                }
+            }
             Err(e) => Response::error(500, &e.to_string()),
         }
+    }
+
+    fn unavailable(&self) -> Option<String> {
+        self.channel.unavailable()
     }
 
     fn metrics(&self, out: &mut String) {
@@ -153,6 +190,9 @@ pub mod tests {
         }
 
         fn load(&self, bundle: &BundleView) -> Result<()> {
+            if bundle.manifest.version == "slow" {
+                std::thread::sleep(Duration::from_secs(2));
+            }
             *self.loaded.lock().unwrap() = Some(bundle.manifest.version.clone());
             Ok(())
         }
@@ -161,6 +201,9 @@ pub mod tests {
             match r.query.first().map(|(k, _)| k.as_str()) {
                 Some("panic") => panic!("asked to"),
                 Some("exit") => std::process::exit(3),
+                Some("hang") => loop {
+                    std::thread::sleep(Duration::from_secs(1));
+                },
                 _ => {}
             }
             let loaded = self.loaded.lock().unwrap().clone().unwrap_or_default();

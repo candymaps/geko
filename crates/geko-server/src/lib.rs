@@ -67,6 +67,10 @@ impl Module for Slot {
     fn shutdown(&self) -> Result<()> {
         self.module().shutdown()
     }
+
+    fn unavailable(&self) -> Option<String> {
+        self.module().unavailable()
+    }
 }
 
 /// An active module and what it said it is.
@@ -260,7 +264,16 @@ async fn blocking<T: Send + 'static>(work: impl FnOnce() -> T + Send + 'static) 
 /// What the module answers, as an HTTP response.
 fn response(r: module::Response) -> Response {
     let status = StatusCode::from_u16(r.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    (status, [(header::CONTENT_TYPE, r.content_type)], r.body).into_response()
+    let mut response = (status, [(header::CONTENT_TYPE, r.content_type)], r.body).into_response();
+    for (name, value) in r.headers {
+        match (header::HeaderName::try_from(name), header::HeaderValue::try_from(value)) {
+            (Ok(name), Ok(value)) => {
+                response.headers_mut().append(name, value);
+            }
+            _ => tracing::warn!("a module answered an invalid header; left out"),
+        }
+    }
+    response
 }
 
 /// The handler of one route of a module: the request as data, answered on the pool if the route
@@ -350,13 +363,16 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
     };
     let health_version = version.clone();
     let health_bundles = bundles.clone();
+    let health_modules = modules.to_vec();
     let health = Router::new().route(
         "/health",
         get(move || {
             let names = names.clone();
             let version = health_version();
             let error = health_bundles.as_ref().and_then(|b| b.error());
-            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error })) }
+            let unavailable: serde_json::Map<String, serde_json::Value> =
+                health_modules.iter().filter_map(|m| Some((m.name().to_owned(), m.module.unavailable()?.into()))).collect();
+            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error, "modules_unavailable": unavailable })) }
         }),
     );
     let tracked = health.merge(module_routes(modules)).route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
@@ -538,6 +554,14 @@ mod tests {
             .write(&root)
             .unwrap();
         std::fs::write(dir.join("current"), version).unwrap();
+    }
+
+    #[test]
+    fn the_headers_of_a_module_reach_the_client() {
+        let r = response(module::Response::error(503, "starting").with_header("retry-after", "3").with_header("bad\nname", "x"));
+        assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(r.headers().get(header::RETRY_AFTER).unwrap(), "3");
+        assert_eq!(r.headers().len(), 2, "content type and retry-after, not the invalid one");
     }
 
     #[test]
