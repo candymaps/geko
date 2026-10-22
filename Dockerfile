@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
 COPY --from=binary /geko /usr/local/bin/geko
-COPY docker/geko.toml /etc/geko/geko.toml
+COPY develop/geko.toml /etc/geko/geko.toml
 # The version of geko (that of Cargo.toml) and its commit, given by `make image` and the image
 # workflow. Last, so that a new version does not rebuild the layers above.
 ARG VERSION=unknown
