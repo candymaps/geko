@@ -5,8 +5,8 @@
 # geocoder lists them all); without it, every default.
 
 [modules]
-geocoder = false
-tiles    = true
+geocoder = true
+tiles    = false
 
 [[scope]]
 country = "ES"          # ISO 3166-1; regions = ["ES-PM"] narrows a country to some regions
