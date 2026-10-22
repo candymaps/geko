@@ -1,8 +1,7 @@
 //! How far the build of a module has gone, for the progress line the host logs every few seconds
 //! while it builds. A module marks its steps (`step`) and, within one, what it expects and what it
-//! has done (`expect`, `advance`: the downloads of every source, the partitions…), and what it
-//! is working on now (`working_on`: the sources being downloaded); the host asks for it with
-//! `Module::progress`. With `--verbose` (`GEKO_VERBOSE`) there is no progress line: every step
+//! has done (`expect`, `advance`: the downloads of every source, the partitions…); the host asks
+//! for it with `Module::progress`. With `--verbose` (`GEKO_VERBOSE`) there is no progress line: every step
 //! logs its own lines instead, which without it are left out while a build runs (`shown`).
 //!
 //! Every process has its own: a module of its own process or library answers with its own, and a
@@ -29,7 +28,7 @@ pub enum Unit {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Progress {
-    /// The step, with what it is working on: "downloading OSM, Overture".
+    /// The step: "downloading sources", "indexing ES".
     pub step: String,
     /// Which step of how many, from 1.
     pub number: u32,
@@ -60,15 +59,12 @@ struct Step {
     number: u32,
     steps: u32,
     unit: Unit,
-    /// What it is working on now (`working_on`), in the order it started.
-    on: Vec<(u64, String)>,
 }
 
 static STEP: Mutex<Option<Step>> = Mutex::new(None);
 static EXPECTED: AtomicU64 = AtomicU64::new(0);
 static DONE: AtomicU64 = AtomicU64::new(0);
 static BUILDING: AtomicBool = AtomicBool::new(false);
-static NEXT_WORK: AtomicU64 = AtomicU64::new(0);
 /// The module that builds, which the progress line names.
 static MODULE: Mutex<String> = Mutex::new(String::new());
 
@@ -108,9 +104,15 @@ pub fn module(name: impl Into<String>) {
 /// Logs the progress line of `progress`, without `--verbose`.
 pub fn log(progress: &Progress) {
     if !verbose() {
-        let module = MODULE.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        tracing::info!(target: TARGET, "building the bundle: {module}, {progress}");
+        note(progress);
     }
+}
+
+/// Logs `what` beside the progress lines, with or without `--verbose`: what is worth leaving on
+/// record of the build, such as the sources it downloads.
+pub fn note(what: impl std::fmt::Display) {
+    let module = MODULE.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    tracing::info!(target: TARGET, "building the bundle: {module}, {what}");
 }
 
 /// The build is now in step `number` of `steps`, `name`, counted in `unit`. The step before, if
@@ -123,7 +125,7 @@ pub fn step(name: impl Into<String>, number: u32, steps: u32, unit: Unit) {
     }
     EXPECTED.store(0, Ordering::Relaxed);
     DONE.store(0, Ordering::Relaxed);
-    let started = Step { name: name.into(), number, steps, unit, on: Vec::new() };
+    let started = Step { name: name.into(), number, steps, unit };
     log(&Progress { done: 0, expected: 1, unit: Unit::Share, ..snapshot(&started) });
     *step = Some(started);
 }
@@ -142,28 +144,6 @@ fn ended(step: &Step) -> Progress {
     match p.expected {
         0 => Progress { done: 1, expected: 1, unit: Unit::Share, ..p },
         expected => Progress { done: expected, ..p },
-    }
-}
-
-/// While it lives, the step is working on `what` (a source being downloaded), which the line names.
-pub struct WorkingOn(Option<u64>);
-
-pub fn working_on(what: impl Into<String>) -> WorkingOn {
-    let id = NEXT_WORK.fetch_add(1, Ordering::Relaxed);
-    match locked().as_mut() {
-        Some(step) => {
-            step.on.push((id, what.into()));
-            WorkingOn(Some(id))
-        }
-        None => WorkingOn(None),
-    }
-}
-
-impl Drop for WorkingOn {
-    fn drop(&mut self) {
-        if let (Some(id), Some(step)) = (self.0, locked().as_mut()) {
-            step.on.retain(|(i, _)| *i != id);
-        }
     }
 }
 
@@ -231,13 +211,8 @@ pub fn current() -> Option<Progress> {
 }
 
 fn snapshot(step: &Step) -> Progress {
-    let name = if step.on.is_empty() {
-        step.name.clone()
-    } else {
-        format!("{} {}", step.name, step.on.iter().map(|(_, w)| w.as_str()).collect::<Vec<_>>().join(", "))
-    };
     Progress {
-        step: name,
+        step: step.name.clone(),
         number: step.number,
         steps: step.steps,
         done: DONE.load(Ordering::Relaxed),
@@ -257,19 +232,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_step_counts_what_it_does_and_names_what_it_works_on() {
+    fn a_step_counts_what_it_does() {
         let building = Building::start();
-        step("downloading", 1, 5, Unit::Items);
-        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading)");
+        step("downloading sources", 1, 5, Unit::Items);
+        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading sources)");
         expect(20);
         advance(7);
-        let osm = working_on("OSM");
-        let overture = working_on("Overture");
-        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading OSM, Overture): 7 of 20 (35 %)");
-        drop(osm);
+        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading sources): 7 of 20 (35 %)");
         advance(30);
-        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading Overture): 20 of 20 (100 %)", "never past the end");
-        drop(overture);
+        assert_eq!(current().unwrap().to_string(), "step 1 of 5 (downloading sources): 20 of 20 (100 %)", "never past the end");
         step("indexing LU", 4, 5, Unit::Share);
         expect(200);
         advance(50);
