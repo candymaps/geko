@@ -44,7 +44,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
     modules=$(echo "$MODULES" | tr ',' ' '); \
     packages=; for m in $modules; do packages="$packages -p geko-module-$m --bin geko-$m"; done; \
-    cargo build --release --locked -p geko-app --no-default-features --bin geko $packages; \
+    # Apart: --no-default-features applies to every package of the command, and would leave the
+    # modules without their own (the geocoder, without its sources).
+    cargo build --release --locked -p geko-app --no-default-features --bin geko; \
+    cargo build --release --locked $packages; \
     mkdir -p /out/modules; cp target/release/geko /out/geko; \
     for m in $modules; do \
       mkdir /out/modules/$m; cp target/release/geko-$m modules/geko-$m/module.toml /out/modules/$m/; \
