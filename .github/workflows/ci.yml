@@ -1,5 +1,6 @@
 # The checks of every pull request. On a pull request (or by hand), `test` finds whether it changes
-# what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it. It is the
+# what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it; if it
+# changes the contract or ci/modules, it also checks that every module is published for it. It is the
 # status that the protection of main and dev requires: it always runs, and passes when the checks
 # passed or were not needed. A pull request from dev into main that takes dev as it is runs none: dev
 # already passed them. pr-comment.yml says on the pull request which of the two it was. What
@@ -25,6 +26,10 @@ jobs:
   # request (this run, from a fork, may not).
   test:
     runs-on: ubuntu-latest
+    # The packages of the modules, which ci/modules.sh check reads.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,6 +70,28 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - if: steps.affected.outputs.code == '1'
         run: ci/test.sh
+      # A pull request that changes the contract, or the modules of ci/modules, needs every module
+      # of the list published for its contract (ci/modules.sh check): neither dev nor main takes a
+      # contract that a module does not speak yet. The modules follow the commit of the pull request
+      # (rev in their Cargo.toml) and publish; then its checks run again. Other pull requests do not
+      # depend on what is in the registry. A run by hand checks.
+      - id: modules
+        run: |
+          check=1
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            contract() { git show "$1:crates/geko-module-sdk/src/module.rs" | sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p'; }
+            check=0
+            [ "$(contract HEAD^1)" = "$(contract HEAD)" ] || check=1
+            git diff --quiet HEAD^1 HEAD -- ci/modules || check=1
+          fi
+          echo "check=$check" >> "$GITHUB_OUTPUT"
+          echo "check $check"
+      - if: steps.modules.outputs.check == '1'
+        uses: oras-project/setup-oras@v1
+      - if: steps.modules.outputs.check == '1'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/modules.sh check
       - if: always() && github.event_name == 'pull_request'
         run: |
           result=failure
