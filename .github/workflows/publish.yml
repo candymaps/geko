@@ -86,9 +86,11 @@ jobs:
             git push -f origin "refs/tags/sdk-$contract"
           fi
       # No image nor release until every module of ci/modules is published for its contract: geko
-      # loads no module of another. It goes after the tag of the SDK, which the modules need to speak
-      # a new contract; once they publish, a new run of this workflow publishes the image. Reading
-      # the private packages of the modules needs the access of this repository in their settings.
+      # loads no module of another. The pull request of a new contract already checked it (ci.yml);
+      # this guards what changed in the registry since. It goes after the tag of the SDK: if it
+      # fails, a new run of this workflow publishes the image once the modules are published.
+      # Reading the private packages of the modules needs the access of this repository in their
+      # settings.
       - if: steps.version.outputs.image == '1'
         uses: oras-project/setup-oras@v1
       - if: steps.version.outputs.image == '1'

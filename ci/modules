@@ -1,4 +1,5 @@
-# The modules that every image and release of geko must find published for its contract
-# (ci/modules.sh check, in publish.yml): one per line, the name of [modules] in geko.toml, published in
-# ghcr.io/candymaps/geko-<module>. A change of contract waits, unpublished, until all of them speak it.
+# The modules that must be published for the contract of geko (ci/modules.sh check): in the checks
+# of a pull request that changes the contract or this list (ci.yml), and before every image and
+# release (publish.yml). One per line, the name of [modules] in geko.toml, published in
+# ghcr.io/candymaps/geko-<module>.
 geocoder
