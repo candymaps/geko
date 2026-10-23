@@ -1,4 +1,4 @@
-//! The modules the host downloads (docs/MODULES_PLAN.md, «Versiones y compatibilidad»): signed
+//! The modules the host downloads (docs/MODULES.md, «Versiones y compatibilidad»): signed
 //! packages in a registry, by default `ghcr.io/candymaps/geko-<module>`, each version in its own
 //! folder, `<data>/modules/<module>/<version>/`. The host fixes the contract, not the version: it
 //! takes the newest module of the contract it speaks (tag `contract-<n>-<platform>`), or the version

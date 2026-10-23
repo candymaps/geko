@@ -30,7 +30,7 @@ pub struct Kind {
     pub name: &'static str,
 }
 
-/// A package of a module (docs/MODULES_PLAN.md): code that the host runs, so never without it.
+/// A package of a module (docs/MODULES.md): code that the host runs, so never without it.
 pub const MODULE: Kind = Kind { domain: "geko-module", format: 1, name: "module" };
 
 /// The platform of this binary, as modules are published for it (`linux-x86_64`).

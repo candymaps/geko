@@ -40,7 +40,7 @@ only() {
 }
 
 # The rules of AGENTS.md that the dependency graph can show: the host knows no module but through
-# the contract of the SDK (docs/MODULES_PLAN.md), and each concrete technology stays inside its
+# the contract of the SDK (docs/MODULES.md), and each concrete technology stays inside its
 # crate. A new user of one of them is either a rule broken or a decision to write down here.
 architecture() {
     local failed=0

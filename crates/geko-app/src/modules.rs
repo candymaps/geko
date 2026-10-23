@@ -1,4 +1,4 @@
-//! The modules of this binary and how the host opens them (docs/MODULES_PLAN.md). Each active module
+//! The modules of this binary and how the host opens them (docs/MODULES.md). Each active module
 //! is, in this order: the package of `GEKO_MODULES` (never downloaded); the one linked in
 //! (`StaticModule`, by the binary that runs the host), unless `[modules.<module>] version` fixes another
 //! version; or the one downloaded from its registry (`store`), the newest of the contract of this

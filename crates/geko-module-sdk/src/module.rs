@@ -1,4 +1,4 @@
-//! The contract between geko (the host) and a module (docs/MODULES_PLAN.md). A module is opened
+//! The contract between geko (the host) and a module (docs/MODULES.md). A module is opened
 //! with its `Context` and then asked, through `Module`, for what each command of the host needs:
 //! to prepare, plan, fetch and build its part of a bundle, and to load that part and answer the
 //! requests of its routes. Every type that crosses it is plain data, so that the same contract

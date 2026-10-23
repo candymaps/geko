@@ -1,5 +1,5 @@
 //! The messages of the contract between the host and a module that is not linked into it
-//! (docs/MODULES_PLAN.md): a library loaded at run time (`dylib`), whose functions pass these
+//! (docs/MODULES.md): a library loaded at run time (`dylib`), whose functions pass these
 //! messages as bytes.
 //!
 //! A frame is the length of its header and that of its payload (`u32`, little-endian), the header

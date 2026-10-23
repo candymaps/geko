@@ -1,4 +1,4 @@
-//! A module that is not linked into the host (docs/MODULES_PLAN.md): every method of `Module` is a
+//! A module that is not linked into the host (docs/MODULES.md): every method of `Module` is a
 //! message of `geko_module_sdk::wire`, carried by a `Channel`: the functions of a library loaded at
 //! run time (`dylib`).
 

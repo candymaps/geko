@@ -1,4 +1,4 @@
-//! What geko serves for every module (docs/MODULES_PLAN.md): `/health`, `/metrics`,
+//! What geko serves for every module (docs/MODULES.md): `/health`, `/metrics`,
 //! `/v1/attribution`, `/openapi.yaml` and `/docs`, API keys, CORS and the rate limit, the bundle
 //! that every module loads and keeps watching, and the routes of each active module, mounted under
 //! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio.

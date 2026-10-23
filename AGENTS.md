@@ -2,7 +2,7 @@
 
 The host of geko, a modular, multi-country geospatial engine: the `geko` binary (configuration, scope, download and loading of the modules, publication and reload of bundles, common HTTP) and the SDK its modules are written against. Each module lives in its own repository: the geocoder in [candymaps/geko-geocoder](https://github.com/candymaps/geko-geocoder) (with the country packs, the golden and its optimizations), tiles in [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles).
 
-The specification of the host is in [PROJECT.md](docs/PROJECT.md), and the contract with the modules in [MODULES_PLAN.md](docs/MODULES_PLAN.md). Read them before designing or implementing anything.
+The specification of the host is in [PROJECT.md](docs/PROJECT.md), and the contract with the modules in [MODULES.md](docs/MODULES.md). Read them before designing or implementing anything.
 
 The roadmap is in PROJECT.md §14, the state in §18 and what is pending in §16. When a step is finished, update them. Delete each pending item when it is closed (whatever it teaches goes to PROJECT.md or here).
 

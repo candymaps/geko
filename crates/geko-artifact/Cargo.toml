@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
-# Signed artifacts in an OCI registry (docs/MODULES_PLAN.md): the country packs of the geocoder and
+# Signed artifacts in an OCI registry (docs/MODULES.md): the country packs of the geocoder and
 # the modules of the host.
 [dependencies]
 geko-module-sdk.workspace = true

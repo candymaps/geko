@@ -1,4 +1,4 @@
-//! `DylibModule` (docs/MODULES_PLAN.md): a module loaded as a library into the process of the host,
+//! `DylibModule` (docs/MODULES.md): a module loaded as a library into the process of the host,
 //! to which every call of `Module` is a message of `geko_module_sdk::wire` passed through the
 //! functions it exports (`geko_module_sdk::dylib`). No hop between processes, but a library cannot
 //! be unloaded safely: it stays loaded until the host exits, and a new version needs a restart.

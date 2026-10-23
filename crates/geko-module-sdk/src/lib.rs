@@ -1,4 +1,4 @@
-//! What geko (the host) and its modules share (docs/MODULES_PLAN.md): the contract a module
+//! What geko (the host) and its modules share (docs/MODULES.md): the contract a module
 //! implements (`module`), the few types both sides speak (country codes, scope, bundle manifest,
 //! downloads) and the helpers every module needs to build incrementally. Nothing here belongs to
 //! one module: what only a module uses lives in the module.

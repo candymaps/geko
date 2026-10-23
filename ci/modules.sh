@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Whether the modules of ci/modules are published for the contract of this geko, which loads no
-# module of another contract (docs/MODULES_PLAN.md). Each module publishes itself, from its
+# module of another contract (docs/MODULES.md). Each module publishes itself, from its
 # repository, in $GEKO_MODULES_REGISTRY/geko-<module> (ghcr.io/candymaps by default), with the tag
 # contract-<n>-<platform>, the newest of its contract:
 #

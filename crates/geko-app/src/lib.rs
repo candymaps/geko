@@ -1,4 +1,4 @@
-//! geko, the host (docs/MODULES_PLAN.md), as a library: its binary runs it with no module linked
+//! geko, the host (docs/MODULES.md), as a library: its binary runs it with no module linked
 //! in, and a module may run it with itself linked in, for its own checks (the golden, valgrind).
 
 mod bundle;

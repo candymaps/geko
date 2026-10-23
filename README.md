@@ -30,7 +30,7 @@ They all share the same foundation:
 - **Fast and lightweight:** written in Rust, with its own indexes. Geocoding answers in milliseconds and serves all of Spain with less than 1 GB of memory.
 - **A new country is a data pack**, with no changes to the engine.
 
-This repository is the host: the `geko` binary, which downloads the modules, builds and reloads their bundles and serves what they share. Each module lives in its own repository. The specification of the host is in [PROJECT.md](docs/PROJECT.md), and the contract of the modules in [MODULES_PLAN.md](docs/MODULES_PLAN.md) (both in Spanish).
+This repository is the host: the `geko` binary, which downloads the modules, builds and reloads their bundles and serves what they share. Each module lives in its own repository. The specification of the host is in [PROJECT.md](docs/PROJECT.md), and the contract of the modules in [MODULES.md](docs/MODULES.md) (both in Spanish).
 
 ## Installation and usage
 

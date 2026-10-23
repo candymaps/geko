@@ -1,5 +1,5 @@
 //! `geko.toml`: what geko (the host) reads. Every module has its own file beside it
-//! (`geko-<module>.toml`, docs/MODULES_PLAN.md); this one keeps the active modules, the scope,
+//! (`geko-<module>.toml`, docs/MODULES.md); this one keeps the active modules, the scope,
 //! the data directory and how data are downloaded, the bundles and the HTTP side of the server.
 
 use std::collections::BTreeMap;

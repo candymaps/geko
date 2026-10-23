@@ -7,7 +7,7 @@
 #   docker run -p 8080:8080 -v geko-data:/var/lib/geko -v ./geko.toml:/etc/geko/geko.toml geko
 #
 # geko comes alone, without modules: it downloads those of [modules] into /var/lib/geko/modules
-# (the newest of its contract, or the fixed version), signed (docs/MODULES_PLAN.md).
+# (the newest of its contract, or the fixed version), signed (docs/MODULES.md).
 #
 # The default command is `up`: serve at once (503 until the first bundle is published) while it
 # downloads and builds what the configuration asks for, and build again every [data] max_age_days,

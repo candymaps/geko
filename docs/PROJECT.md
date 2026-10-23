@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-geko es un motor geoespacial modular y multipaís. Este repositorio es **el host**: el binario `geko`, que lee la configuración, resuelve el ámbito, baja y carga los módulos, publica y recarga los bundles y sirve lo común por HTTP. Cada servicio es un **módulo** con su propio repositorio, que el host conoce solo por el contrato de `geko-module-sdk` (docs/MODULES_PLAN.md):
+geko es un motor geoespacial modular y multipaís. Este repositorio es **el host**: el binario `geko`, que lee la configuración, resuelve el ámbito, baja y carga los módulos, publica y recarga los bundles y sirve lo común por HTTP. Cada servicio es un **módulo** con su propio repositorio, que el host conoce solo por el contrato de `geko-module-sdk` (docs/MODULES.md):
 
 | Módulo | Repositorio | Estado |
 |---|---|---|
@@ -11,7 +11,7 @@ geko es un motor geoespacial modular y multipaís. Este repositorio es **el host
 
 Todo el ciclo es **automático**: se declaran en `geko.toml` el ámbito y los módulos, y geko baja los módulos, les pide que descarguen y generen lo suyo para el ámbito, publica el bundle y lo sirve (sección 7).
 
-Los objetivos medibles de cada servicio (latencia, caudal, acierto frente a Pelias) son de su módulo. Los del host: que el salto hasta el módulo no se note en sus medidas (medido con el geocoder y España, docs/MODULES_PLAN.md, paso 2) y que un pánico de un módulo solo falle su petición (`catch_unwind` en la frontera de `DylibModule`; un fallo más grave, como un segfault o quedarse sin memoria, sí tira el servicio, que comparte proceso con el módulo).
+Los objetivos medibles de cada servicio (latencia, caudal, acierto frente a Pelias) son de su módulo. Los del host: que el salto hasta el módulo no se note en sus medidas (medido con el geocoder y España, docs/MODULES.md, «Adaptador») y que un pánico de un módulo solo falle su petición (`catch_unwind` en la frontera de `DylibModule`; un fallo más grave, como un segfault o quedarse sin memoria, sí tira el servicio, que comparte proceso con el módulo).
 
 ### 1.1 No objetivos (por ahora)
 
@@ -233,7 +233,7 @@ geko/
 
 ## 14. Hoja de ruta
 
-1. **Host y módulos** (docs/MODULES_PLAN.md): pasos 1–6 *(hechos; quedan las semanas de uso real del paso 6)*; paso 7, los repositorios aparte *(hecho, 2026-10-22)*.
+1. **Host y módulos** (docs/MODULES.md) *(hecho, 2026-10-21/23; quedan las semanas de uso real del contrato, punto 46, y las pruebas cruzadas, punto 47)*.
 2. **Operación:** `BundleStore` con S3 y enrutador entre nodos; regeneración programada con diffs *(del geocoder)*.
 3. **Más módulos:** teselas (`tiles`), enrutamiento.
 
@@ -251,8 +251,8 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 |---|---|---|---|---|
 | 26 | Licencias antes de abrir el servicio | El aviso de base derivada (ODbL 4.6) está servido (`/v1/attribution`) | S | ⬜ Fuera del código: que lo revise un abogado y fijar `[serve] attribution_contact` |
 | 43 | `BundleStore` con S3 y enrutador entre nodos | Hoy los bundles se sirven de disco o por HTTP (`bundles_url`) | M | ⬜ Cuando un nodo no baste |
-| 46 | Módulos descargables | Plan en [MODULES_PLAN.md](MODULES_PLAN.md) | L | ⬜ Pasos 1–5 y 7 hechos; del 6, la suite hecha, y quedan unas semanas de uso real. Decidido (2026-10-23): `DylibModule`, elegido por la medición con España, es el único adaptador; `ProcessModule` se quitó |
-| 47 | Pruebas cruzadas | El golden del geocoder contra la última imagen del host de su contrato, y la conformidad del host contra el último módulo publicado (MODULES_PLAN.md, paso 7) | M | ⬜ |
+| 46 | Estabilizar `contract-1` | Unas semanas de uso real con el contrato tal cual ([MODULES.md](MODULES.md)); cada cambio que pida va a su suite de conformidad | M | ⬜ |
+| 47 | Pruebas cruzadas | El golden del geocoder contra la última imagen del host de su contrato, y la conformidad del host contra el último módulo publicado ([MODULES.md](MODULES.md)): en la CI de cada módulo al publicarlo, y en la del host al publicar su imagen | M | ⬜ |
 | 48 | Datos de un módulo desactivado | `geko purge` solo pregunta a los módulos activos, y uno desactivado no se instancia: sus descargas y ficheros de trabajo (los del geocoder: `raw/`, `staging/`, `canonical/`, `segments/`, decenas de GB con España) se quedan en `/var/lib/geko` para siempre. Además están en su raíz, sin carpeta por módulo, así que el host no sabe de quién son | M | ⬜ Cada módulo, con su carpeta de datos (`/var/lib/geko/<módulo>/`, dada en el `Context`), y el host decide cuándo borrar la de uno desactivado: nunca por defecto, para que desactivarlo un tiempo no obligue a descargar y generar de cero; a demanda con `geko purge data` (o `geko purge module <módulo>`); y, opcional, al cabo de un plazo configurable en `geko.toml` (por ejemplo `[data] purge_disabled_after_days`, apagado por defecto) |
 
 ## 17. Rutas
@@ -264,7 +264,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 
 ## 18. Estado
 
-- **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
+- **Host y módulos** (2026-10-21/22, [MODULES.md](MODULES.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
 - **Servicio:** página de demostración en `/`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
