@@ -9,8 +9,8 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use geko_core::ports::{Checksum, DownloadOutcome, DownloadRequest, Downloader};
-use geko_core::{GekoError, Result};
+use geko_module_sdk::download::{Checksum, DownloadOutcome, DownloadRequest, Downloader};
+use geko_module_sdk::{GekoError, Result};
 use md5::Md5;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
