@@ -1,0 +1,4 @@
+# The modules that every image and release of geko must find published for its contract
+# (ci/modules.sh check, in publish.yml): one per line, the name of [modules] in geko.toml, published in
+# ghcr.io/candymaps/geko-<module>. A change of contract waits, unpublished, until all of them speak it.
+geocoder
