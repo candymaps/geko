@@ -1,5 +1,5 @@
 //! Pull of an OCI artifact, such as a country pack, from a registry such as ghcr.io (PROJECT.md
-//! §2.4), with the distribution API: an anonymous token when the registry asks for one, the
+//! §7.2), with the distribution API: an anonymous token when the registry asks for one, the
 //! manifest, then each layer, checked against its digest. Each layer is a file, named by its
 //! `org.opencontainers.image.title` annotation, as `oras push` leaves them.
 
@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::time::Duration;
 
-use geko_core::{GekoError, Result};
+use geko_module_sdk::{GekoError, Result};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
@@ -19,7 +19,7 @@ const TITLE: &str = "org.opencontainers.image.title";
 /// No file of an artifact may be larger: a country pack is a few megabytes.
 const MAX_BLOB: u64 = 256 << 20;
 
-/// `<host>/<repository>:<tag>`, e.g. `ghcr.io/edgaza/geko/countries/es:format-1`.
+/// `<host>/<repository>:<tag>`, e.g. `ghcr.io/candymaps/geko/countries/es:format-1`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reference {
     pub host: String,
@@ -61,6 +61,8 @@ pub struct Artifact {
 #[derive(Deserialize)]
 struct Manifest {
     layers: Vec<Layer>,
+    #[serde(default)]
+    annotations: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +96,14 @@ impl OciClient {
     /// for an anonymous client: missing, or not public.
     pub fn digest(&self, reference: &Reference) -> Result<Option<String>> {
         Ok(self.manifest(reference)?.map(|(digest, _, _)| digest))
+    }
+
+    /// The digest of the manifest of `reference` and its annotations (`oras push --annotation`),
+    /// read without downloading any file; None as for `digest`.
+    pub fn annotations(&self, reference: &Reference) -> Result<Option<(String, HashMap<String, String>)>> {
+        let Some((digest, body, _)) = self.manifest(reference)? else { return Ok(None) };
+        let manifest: Manifest = serde_json::from_slice(&body).map_err(|e| GekoError::Data(format!("{reference}: invalid manifest: {e}")))?;
+        Ok(Some((digest, manifest.annotations)))
     }
 
     /// The artifact, or None as for `digest`. Every file is checked against its digest.
@@ -241,7 +251,7 @@ mod tests {
             .iter()
             .map(|(name, bytes)| format!(r#"{{"mediaType":"application/octet-stream","digest":"{}","size":{},"annotations":{{"{TITLE}":"{name}"}}}}"#, digest(bytes), bytes.len()))
             .collect();
-        let manifest = format!(r#"{{"schemaVersion":2,"layers":[{}]}}"#, layers.join(","));
+        let manifest = format!(r#"{{"schemaVersion":2,"layers":[{}],"annotations":{{"geko.version":"1.2.0"}}}}"#, layers.join(","));
         let blobs: HashMap<String, Vec<u8>> = files
             .iter()
             .map(|(_, bytes)| (digest(bytes), if tamper { b"other".to_vec() } else { bytes.to_vec() }))
@@ -252,14 +262,14 @@ mod tests {
                 let url = request.url().to_owned();
                 let authorized = request.headers().iter().any(|h| h.field.equiv("Authorization") && h.value.as_str() == "Bearer t0k");
                 let response = if url.starts_with("/token") {
-                    assert!(url.contains("scope=repository%3Aedgaza%2Fgeko%2Fcountries%2Fes%3Apull"), "{url}");
+                    assert!(url.contains("scope=repository%3Acandymaps%2Fgeko%2Fcountries%2Fes%3Apull"), "{url}");
                     Response::from_string(r#"{"token":"t0k"}"#)
                 } else if !authorized {
-                    let challenge = format!(r#"Bearer realm="{realm}",service="test",scope="repository:edgaza/geko/countries/es:pull""#);
+                    let challenge = format!(r#"Bearer realm="{realm}",service="test",scope="repository:candymaps/geko/countries/es:pull""#);
                     Response::from_string("").with_status_code(401).with_header(Header::from_bytes("WWW-Authenticate", challenge).unwrap())
-                } else if url == "/v2/edgaza/geko/countries/es/manifests/format-1" {
+                } else if url == "/v2/candymaps/geko/countries/es/manifests/format-1" {
                     Response::from_string(manifest.clone())
-                } else if let Some(d) = url.strip_prefix("/v2/edgaza/geko/countries/es/blobs/") {
+                } else if let Some(d) = url.strip_prefix("/v2/candymaps/geko/countries/es/blobs/") {
                     Response::from_data(blobs[d].clone())
                 } else {
                     Response::from_string("").with_status_code(404)
@@ -272,10 +282,10 @@ mod tests {
 
     #[test]
     fn parses_references() {
-        let r = Reference::parse("ghcr.io/edgaza/geko/countries/es:format-1").unwrap();
-        assert_eq!((r.host.as_str(), r.repository.as_str(), r.tag.as_str()), ("ghcr.io", "edgaza/geko/countries/es", "format-1"));
-        assert_eq!(r.to_string(), "ghcr.io/edgaza/geko/countries/es:format-1");
-        assert!(Reference::parse("ghcr.io/edgaza/geko").is_err());
+        let r = Reference::parse("ghcr.io/candymaps/geko/countries/es:format-1").unwrap();
+        assert_eq!((r.host.as_str(), r.repository.as_str(), r.tag.as_str()), ("ghcr.io", "candymaps/geko/countries/es", "format-1"));
+        assert_eq!(r.to_string(), "ghcr.io/candymaps/geko/countries/es:format-1");
+        assert!(Reference::parse("ghcr.io/candymaps/geko").is_err());
         assert!(Reference::parse("es:1").is_err());
     }
 
@@ -292,19 +302,21 @@ mod tests {
         let files: [(&str, &[u8]); 2] = [("pack.toml", b"country = \"ES\""), ("data/words.toml", b"connectors = []")];
         let host = registry(&files, false);
         let client = OciClient::new();
-        let reference = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-1")).unwrap();
+        let reference = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-1")).unwrap();
         let artifact = client.pull(&reference).unwrap().unwrap();
         assert_eq!(artifact.files, files.iter().map(|(n, b)| (n.to_string(), b.to_vec())).collect::<Vec<_>>());
         assert_eq!(client.digest(&reference).unwrap().as_deref(), Some(artifact.digest.as_str()));
+        let (digest, annotations) = client.annotations(&reference).unwrap().unwrap();
+        assert_eq!((digest.as_str(), annotations["geko.version"].as_str()), (artifact.digest.as_str(), "1.2.0"));
 
-        let missing = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-9")).unwrap();
+        let missing = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-9")).unwrap();
         assert_eq!(client.pull(&missing).unwrap(), None);
     }
 
     #[test]
     fn rejects_a_file_that_does_not_match_its_digest() {
         let host = registry(&[("pack.toml", b"country = \"ES\"")], true);
-        let reference = Reference::parse(&format!("{host}/edgaza/geko/countries/es:format-1")).unwrap();
+        let reference = Reference::parse(&format!("{host}/candymaps/geko/countries/es:format-1")).unwrap();
         let err = OciClient::new().pull(&reference).unwrap_err();
         assert!(err.to_string().contains("not sha256:"), "{err}");
     }

@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use geko_core::Result;
+use geko_module_sdk::Result;
 use serde::{Deserialize, Serialize};
 
 /// Sidecar `<file>.raw.json` describing a downloaded file (PROJECT.md §7.3).
@@ -48,7 +48,7 @@ pub fn write(file: &Path, record: &RawRecord) -> Result<()> {
 pub fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let tmp = with_suffix(path, ".tmp");
     let mut f = fs::File::create(&tmp)?;
-    f.write_all(&serde_json::to_vec_pretty(value).map_err(|e| geko_core::GekoError::Other(e.into()))?)?;
+    f.write_all(&serde_json::to_vec_pretty(value).map_err(|e| geko_module_sdk::GekoError::Other(e.into()))?)?;
     f.sync_all()?;
     fs::rename(&tmp, path)?;
     Ok(())
