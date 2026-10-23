@@ -81,7 +81,7 @@ Every section and option of geko itself (the host), with its default value unles
 # built the bundle it serves, and downloads it if missing.
 [modules]
 geocoder = true
-tiles    = false                    # still a skeleton: it serves nothing yet
+tiles    = false                    # still a skeleton, not published: off unless set to true
 
 # [modules.geocoder]                # instead of `geocoder = true` above
 # version  = "1.4.2"                # default: the newest of the contract of this geko

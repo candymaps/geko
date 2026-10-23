@@ -202,8 +202,9 @@ const MOVED_TO_GEOCODER: &[(&str, Option<&str>)] = &[
     ("serve", Some("cache_entries")),
 ];
 
-/// The modules active by default, without a `[modules]` entry.
-const DEFAULT_MODULES: &[&str] = &["geocoder", "tiles"];
+/// The modules active by default, without a `[modules]` entry: only those published for every
+/// geko, so that a geko.toml that names none of them starts. Tiles is not yet: `tiles = true`.
+const DEFAULT_MODULES: &[&str] = &["geocoder"];
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
@@ -292,9 +293,9 @@ mod tests {
     }
 
     #[test]
-    fn defaults_enable_both_modules() {
+    fn defaults_enable_the_geocoder_alone() {
         let c = Config::parse("").unwrap();
-        assert_eq!(names(&c), ["geocoder", "tiles"]);
+        assert_eq!(names(&c), ["geocoder"]);
         assert_eq!(c.serve.listen.port(), 8080);
         assert!(!c.data.accept_licenses);
         assert_eq!(c.data.refresh, Refresh::IfChanged);
@@ -308,6 +309,10 @@ mod tests {
     fn modules_as_booleans_or_tables() {
         let c = Config::parse("[modules]\ntiles = false\n").unwrap();
         assert_eq!(names(&c), ["geocoder"]);
+        let c = Config::parse("[modules]\ntiles = true\n").unwrap();
+        assert_eq!(names(&c), ["geocoder", "tiles"]);
+        let c = Config::parse("[modules]\ngeocoder = false\ntiles = true\n").unwrap();
+        assert_eq!(names(&c), ["tiles"]);
         let c = Config::parse("[modules.geocoder]\nconfig = \"exact.toml\"\n\n[modules.tiles]\nenabled = false\n").unwrap();
         assert_eq!(names(&c), ["geocoder"]);
         let geocoder = ModuleName::new("geocoder").unwrap();
