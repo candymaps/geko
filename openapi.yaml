@@ -16,7 +16,7 @@ servers:
 paths:
   /:
     get:
-      summary: A demo page, with a map, of what the active modules offer (the search of the geocoder). Never needs an API key.
+      summary: A demo page, with a map, of what the active modules offer (the search of the geocoder, the vector tiles and style of the tiles module). Never needs an API key.
       responses:
         "200":
           description: An HTML page that loads Leaflet from unpkg.com.

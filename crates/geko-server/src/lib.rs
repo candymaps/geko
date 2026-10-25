@@ -513,7 +513,7 @@ mod tests {
 
         let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/"), "the demo of the host");
+        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/") && page.contains("/tiles/styles/"), "the demo of the host");
         let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.headers()[header::LOCATION], "/fake/");
     }

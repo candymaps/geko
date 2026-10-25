@@ -38,7 +38,8 @@
 </div>
 <script>
 const map = L.map('map', { zoomControl: false }).setView([40.4, -3.7], 6);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+// The tiles of OpenStreetMap, until the tiles module (if active) replaces them with its own.
+const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
 }).addTo(map);
 const layer = L.layerGroup().addTo(map);
@@ -141,14 +142,49 @@ text.addEventListener('keydown', async e => {
 });
 map.on('click', e => { if (geocoder) ask('reverse', { 'point.lat': e.latlng.lat, 'point.lon': e.latlng.lng }); });
 
+function script(src) {
+  return new Promise((resolve, reject) => {
+    const s = Object.assign(document.createElement('script'), { src, onload: resolve, onerror: reject });
+    document.head.append(s);
+  });
+}
+
+// The map of the tiles module: its vector tiles, painted by one of its styles (the light or dark
+// one, in the language of the browser if there is a style for it) with MapLibre inside Leaflet.
+async function vectorTiles() {
+  const catalog = await (await fetch('/tiles/styles.json')).json();
+  const lang = [...navigator.languages, 'en'].map(l => l.split('-')[0]).find(l => catalog.languages.includes(l));
+  const flavor = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  const r = await fetch(`/tiles/styles/${flavor}/${lang}.json`);
+  if (!r.ok) throw new Error((await r.json()).error);
+  const style = await r.json();
+  // MapLibre asks for absolute URLs (it fetches the tiles from a worker), and the module writes them
+  // as the host serves them: the TileJSON goes into the style, with its URLs made absolute.
+  const absolute = u => u.startsWith('/') ? location.origin + u : u;
+  const source = style.sources.protomaps;
+  const tilejson = await (await fetch(absolute(source.url))).json();
+  const { minzoom, maxzoom, bounds, attribution } = tilejson;
+  style.sources.protomaps = { type: 'vector', tiles: tilejson.tiles.map(absolute), minzoom, maxzoom, bounds, attribution,
+                              ...(source.encoding ? { encoding: source.encoding } : {}) };
+  style.glyphs = absolute(style.glyphs);
+  style.sprite = absolute(style.sprite);
+  document.head.append(Object.assign(document.createElement('link'), { rel: 'stylesheet', href: 'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css' }));
+  await script('https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js');
+  await script('https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js');
+  L.maplibreGL({ style, attribution: tilejson.attribution }).addTo(map);
+  osm.remove();
+}
+
 // The page of the host shows what the active modules offer: without the geocoder, only the map.
 let geocoder = false;
 fetch('/health').then(r => r.json()).then(h => {
-  geocoder = (h.modules || []).includes('geocoder');
+  const modules = h.modules || [];
+  geocoder = modules.includes('geocoder');
   if (!geocoder) {
     document.getElementById('panel').hidden = true;
     pin.remove();
   }
+  if (modules.includes('tiles')) vectorTiles().catch(e => console.warn('the tiles of geko are not available:', e));
 }).catch(() => {});
 </script>
 </body>
