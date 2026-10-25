@@ -31,9 +31,12 @@ FROM scratch AS binary
 COPY --from=build /out/geko /geko
 
 # The repositories of the modules, given as build contexts of the same name (develop/compose.yaml);
-# empty without them.
+# empty without them. `tiles-profile`: what `ci/profile.sh` of the tiles module leaves (its
+# Planetiler profile and its styles), which that module compiles in; without it, the module builds
+# no tiles and serves no style.
 FROM scratch AS geocoder
 FROM scratch AS tiles
+FROM scratch AS tiles-profile
 
 # geko and the modules of MODULES (comma-separated), each as the library that geko loads, as
 # GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
@@ -53,8 +56,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=geko-target-local,target=/src/target \
     --mount=type=bind,from=geocoder,target=/modules/geocoder \
     --mount=type=bind,from=tiles,target=/modules/tiles \
+    --mount=type=bind,from=tiles-profile,target=/modules/tiles-profile \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
+    [ ! -f /modules/tiles-profile/protomaps-basemap.jar ] || export GEKO_TILES_PROFILE=/modules/tiles-profile/protomaps-basemap.jar; \
     cargo build --profile $PROFILE --locked -p geko-app --bin geko; \
     mkdir -p /out/modules /work; cp target/$PROFILE/geko /out/geko; \
     for m in $(echo "$MODULES" | tr ',' ' '); do \
@@ -73,8 +78,9 @@ FROM debian:bookworm-slim AS base
 LABEL org.opencontainers.image.source=https://github.com/candymaps/geko
 LABEL org.opencontainers.image.description="geko: geocoder with OSM and official national sources"
 # ca-certificates for the mirrors and buckets that are not reached through the certificates
-# compiled into the binary; curl for the health check.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+# compiled into the binary; curl for the health check; libfontconfig1 for the Java runtime that
+# the tiles module downloads to build (Planetiler reads the fonts of its profile with it).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libfontconfig1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
 USER geko

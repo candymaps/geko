@@ -48,7 +48,10 @@ DEV_PORT    ?= 8080
 DEV_MODULES_DIR ?= $(abspath ..)
 DEV_CONFIG  ?= develop/geko.toml
 DEV_MODULES ?= $(shell awk '/^\[/ { on = ($$1 == "[modules]") } on && $$2 == "=" && $$3 == "true" { print $$1 }' $(DEV_CONFIG) | paste -sd, -)
+# The Planetiler profile and the styles of the tiles module (its ci/profile.sh), if built.
+DEV_TILES_PROFILE ?= $(wildcard $(or $(CARGO_TARGET_DIR),$(HOME)/.cache/geko-target)/profile/out)
 DEV_COMPOSE := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PORT) GEKO_DEV_MODULES=$(DEV_MODULES) GEKO_DEV_MODULES_DIR="$(DEV_MODULES_DIR)" \
+               GEKO_DEV_TILES_PROFILE="$(DEV_TILES_PROFILE)" \
                GEKO_DEV_VERSION=$(VERSION)-$(COMMIT)$(DIRTY) docker compose -f develop/compose.yaml
 
 .PHONY: help bin install serve up data image start-dev stop-dev release test test-changed
