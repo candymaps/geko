@@ -73,8 +73,9 @@ FROM debian:bookworm-slim AS base
 LABEL org.opencontainers.image.source=https://github.com/candymaps/geko
 LABEL org.opencontainers.image.description="geko: geocoder with OSM and official national sources"
 # ca-certificates for the mirrors and buckets that are not reached through the certificates
-# compiled into the binary; curl for the health check.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+# compiled into the binary; curl for the health check; libfontconfig1 because the Java runtime that
+# the tiles module downloads to run Planetiler reads the fonts of the profile with it.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libfontconfig1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
 USER geko
