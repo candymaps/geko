@@ -13,6 +13,8 @@
 #                      does not accept the licences: use your own, outside the repository)
 #   GEKO_DEV_MODULES   the modules to build, comma-separated (default: geocoder)
 #   GEKO_DEV_MODULES_DIR  where their repositories are (default: the folder of this one)
+#   GEKO_DEV_TILES_PROFILE  the folder that ci/profile.sh of geko-tiles filled, which the tiles module
+#                      is compiled with (make start-dev builds it; without tiles, any folder)
 #   GEKO_DEV_VERSION   the version the modules say they are, in the bundles they build
 #                      (make start-dev: <version>-<commit>[-dirty])
 #   GEKO_DEV_PORT      the port on this machine (default: 8080)
@@ -26,6 +28,7 @@ services:
       additional_contexts:
         geocoder: ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder
         tiles: ${GEKO_DEV_MODULES_DIR:-../..}/geko-tiles
+        tiles-profile: ${GEKO_DEV_TILES_PROFILE:-.}
       args:
         MODULES: ${GEKO_DEV_MODULES:-geocoder}
         GEKO_MODULE_VERSION: ${GEKO_DEV_VERSION:-}
