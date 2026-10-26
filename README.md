@@ -131,6 +131,8 @@ mode = "single"                     # single: every module in one process, where
 
 Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
 
+To try it without Kubernetes, `develop/compose-split.yaml` runs it as the cluster would: a build job per module, one after the other, a server per module and an nginx that sends each path to its module (`GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build`, with the same variables as `make start-dev`).
+
 ## License
 
 geko is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). You may use, study, modify and share it freely. If you distribute it, modified or not, you must pass on its source code under the same license; if you modify it and let others use it over a network, you must offer them the source code of your version. Running it, or modifying it for internal use only, requires nothing more.
