@@ -182,6 +182,37 @@ Por eso:
 2. **Al tocar algo del host, procesos separados en local**: `geko build`, `geko serve --module geocoder` y `geko serve --module tiles` con `bundles_url`, a mano o en un `docker-compose`. Es el modo operador sin Kubernetes.
 3. **En la CI, el modo operador en un cluster** con `kind` o `k3d` y Luxemburgo: aplicar el kustomization, esperar a los pods, consultar `/geocoder/` y `/tiles/`, tirar un pod y comprobar que el otro módulo sigue respondiendo.
 
+### Los mismos YAML en local, en la CI y en producción
+
+Para que lo que se sube y lo que se prueba sea idéntico, los manifiestos tienen **una sola fuente**:
+
+- `deploy/` con una base de kustomize (un `Deployment` y un `Service` por módulo, el `CronJob` de build, el PVC y las rutas) y overlays `local`, `ci` y `prod`. Entre overlays solo cambia lo inevitable (réplicas, dominio, clase de almacenamiento) y `[deploy]` de `geko.toml`.
+- Si se usa `geko k8s render` (paso 7), su salida es esa base, y el operador (paso 9) reconcilia lo mismo.
+- **Sin cluster, en cada PR:** `kustomize build` de cada overlay validado con `kubeconform`, y un diff contra los YAML versionados que falla si se cambia el código sin regenerarlos.
+- **Con cluster, en la CI y en local:** crear `kind` o `k3d`, cargar las imágenes del árbol de trabajo (`kind load docker-image` o `k3d image import`, sin registro), `kubectl apply -k deploy/overlays/<overlay>`, esperar a los pods y consultar `/geocoder/` y `/tiles/`. Comprobaciones: tirar el pod de un módulo y ver que el otro sigue respondiendo; subir las réplicas de `geocoder` a 3 y ver que `tiles` se queda en 1.
+
+Lo que un cluster local no reproduce:
+
+- **El PVC `ReadWriteMany`.** `kind` y `k3d` traen almacenamiento `ReadWriteOnce`, que en un cluster de un solo nodo funciona pero no demuestra que el RWX de producción lo haga. Hace falta un aprovisionador NFS local o una prueba aparte en un cluster real.
+- **Latencia y límites de memoria reales**, el Ingress de la plataforma y un RBAC endurecido.
+
+### Los `make` de desarrollo siguen el modo
+
+Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` de la misma configuración que ya leen para saber qué módulos construir (`DEV_CONFIG`, hoy en `DEV_MODULES`), y cambian de camino:
+
+| Comando | `single` (por defecto) | `operator` |
+|---|---|---|
+| `make start-dev` | Como hoy: un contenedor con geko y los módulos (`develop/compose.yaml`) | Crea el cluster local si no existe, construye y carga las imágenes, aplica el overlay `local`, espera a los pods y deja el dashboard en el mismo `http://localhost:8080/` con un `port-forward` |
+| `make stop-dev` | Baja el contenedor, conserva su volumen | Borra los recursos del overlay y conserva el cluster y el PVC (o `make stop-dev PURGE=1` lo borra todo) |
+| el seguimiento del log | `docker compose logs -f` | `kubectl logs -f` de los pods de los módulos |
+
+- **Misma experiencia:** el mismo comando, la misma URL y la misma configuración. Solo cambia `[deploy] mode`.
+- **Idempotente:** si el cluster o las imágenes ya están, se reaprovechan; un cambio de código solo reconstruye la imagen y reinicia los pods.
+- **Sin sorpresas:** si falta `kind` o `k3d`, o `kubectl`, `make start-dev` dice qué instalar y no hace nada a medias. Sin `[deploy]`, es `single`.
+- **Hasta el paso 9** no hay operador: el modo `operator` de desarrollo aplica los manifiestos del paso 7, que son los mismos que reconciliaría el operador. Cuando exista, el overlay `local` lo desplegará dentro del cluster.
+- **Primera ejecución más lenta** (crear el cluster y construir las imágenes); las siguientes, no.
+- **Rutas con espacios** en el `Makefile`: hoy no se entrecomilla `DEV_CONFIG` y falla con rutas como `03 Candymaps`. Hay que arreglarlo al tocarlo.
+
 ## Por decidir
 
 1. **Una imagen o una por módulo.**
@@ -202,6 +233,7 @@ Por eso:
 5. **`single` sobre el camino de bundles del operador**, con `BundleStore`.
 6. **Procesos separados en local** (`docker-compose` de ejemplo) para desarrollar el host.
 7. **`geko k8s render`** o un chart de Helm, con su prueba en `kind` o `k3d` en la CI.
+7 bis. **`make start-dev` y `make stop-dev` según `[deploy] mode`**: `single` como hoy; `operator` crea el cluster local y aplica el overlay `local` de `deploy/` (ver «Los `make` de desarrollo siguen el modo»).
 8. **`BundleStore` con S3** (punto 43 de PROJECT.md), solo si un cluster no ofrece `ReadWriteMany` o el PVC no basta.
 9. **El operador** (`kube-rs`), cuando haya alguien que lo pida, con la misma prueba en la CI que el paso 7.
 
