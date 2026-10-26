@@ -68,6 +68,27 @@ El almacenamiento de bundles del modo operador es un `PVC` con acceso `ReadWrite
 - **Lo que exige:** un cluster con una clase de almacenamiento `ReadWriteMany` (NFS, CephFS, Azure Files, EFS, Filestore…). No todos la tienen.
 - **S3 queda para después**, como segundo `BundleStore` (paso 8), si un cluster no ofrece `ReadWriteMany` o el PVC no basta. El operador no lo necesita para empezar.
 
+### Una imagen por módulo (2026-10-26)
+
+El operador despliega, para cada módulo, la imagen `ghcr.io/candymaps/geko-<módulo>`: el host con ese módulo enlazado mediante `geko_app::main(linked)`, como ya hace `crates/geko-host` del geocoder para sus checks. El operador resuelve la etiqueta por contrato (la más nueva del contrato de geko, o la fijada con `version`).
+
+- **Por qué:** cada módulo vive en su repositorio y se publica a su ritmo; una imagen única obligaría a juntar los repositorios en cada release. Así también se cumple la actualización por separado y cada pod solo lleva el código de su módulo.
+- **Coste asumido:** la versión del host va dentro de cada imagen, así que un cambio del host exige reconstruir las de cada módulo. El contrato (`sdk-<contrato>`) ya obliga a coordinarlos.
+- **Descartada:** una imagen `geko` con todos los módulos enlazados, con `--module <módulo>` en cada `Deployment`. Una sola imagen que publicar, pero más grande, con las versiones de los módulos atadas a las del host.
+
+### `DylibModule` y la descarga de módulos firmados se mantienen (2026-10-26)
+
+No se quitan. Con una imagen por módulo, el modo `operator` ya no los usa, pero `single` sí: es la forma de tener en un solo `docker run` módulos que se publican por separado. Quitarlos obligaría a `single` a usar una imagen combinada, justo lo descartado arriba. Funciona y está medido (sin coste frente a enlazado). Se puede reabrir cuando el operador exista y se vea cuánto se usan.
+
+### Las rutas comunes las sirve cada módulo (2026-10-26)
+
+`/v1/attribution`, `/docs` y `/metrics` los sirve cada módulo, con el código en la SDK; no hay servicio agregador.
+
+- El Ingress ya manda `/<módulo>/*` al pod que toca, así que `/geocoder/v1/attribution` y `/tiles/v1/attribution` no piden nada nuevo en el camino de las peticiones.
+- `/metrics` por pod es lo habitual en Kubernetes: Prometheus lo recoge de cada pod, no a través del Ingress.
+- En `single` lo sirve el host con el mismo código de la SDK, así que el resultado es idéntico en los dos modos.
+- Una página de `/docs` unificada puede generarse más adelante al renderizar los manifiestos.
+
 ### `single` usa el mismo camino que el operador
 
 El build publica un bundle y el servicio lo detecta y lo recarga, con la misma abstracción (`BundleStore`): disco local en `single`, PVC o HTTP (`bundles_url`) en el operador. Así se desarrolla en `single` sobre el mismo camino que llega a producción.
@@ -95,11 +116,11 @@ configMapGenerator:
 
 6. Se aplica el kustomization (`kubectl apply -k`, ArgoCD o Flux).
 7. El operador lee `geko.toml`: módulos activos, ámbito y opciones.
-8. **Resuelve versiones**: la imagen de cada módulo, la más nueva de su contrato o la fijada con `version` (ver «Por decidir», 1).
+8. **Resuelve versiones**: la imagen de cada módulo, la más nueva de su contrato o la fijada con `version` (ver «Decidido», una imagen por módulo).
 9. **Lanza el build**: un `Job` por módulo (o por módulo y país) que descarga con el `Downloader`, genera su parte del bundle y la publica en el almacenamiento. El Job tiene sus propios `requests` y `limits`: el pico de memoria del build no toca a los pods que sirven. Tiles lanza Planetiler dentro de su Job.
 10. **Despliega los módulos**: un `Deployment` y un `Service` por módulo activo, en modo servicio, con `bundles_url` apuntando al almacenamiento.
 11. **Readiness**: cada pod responde 503 en `/health` hasta cargar su bundle, y Kubernetes no le manda tráfico hasta entonces.
-12. **Rutas**: un `Ingress` o `HTTPRoute` que manda `/geocoder/*` al servicio del geocoder y `/tiles/*` al de tiles. Las rutas comunes, en «Por decidir», 3.
+12. **Rutas**: un `Ingress` o `HTTPRoute` que manda `/geocoder/*` al servicio del geocoder y `/tiles/*` al de tiles. Las rutas comunes las sirve cada módulo (ver «Decidido»).
 
 ### Servicio
 
@@ -215,21 +236,16 @@ Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` 
 
 ## Por decidir
 
-1. **Una imagen o una por módulo.**
-   - *Una imagen `geko` con todos los módulos enlazados* al compilar: el operador crea `Deployment` de la misma imagen con `--module <módulo>`. Una sola imagen que publicar y el mismo código en los dos modos, sin descargas de `.so`. A cambio, la imagen es más grande y las versiones de los módulos van con las de geko.
-   - *Una imagen por módulo* (`ghcr.io/candymaps/geko-<módulo>`, el host con ese módulo enlazado mediante `geko_app::main(linked)`): cada módulo publica a su ritmo; el operador resuelve la etiqueta por contrato.
-2. **Qué pasa con `DylibModule` y la descarga de módulos firmados.** Si todos los módulos son nuestros, la carga dinámica es complejidad sin retorno (ABI, versiones, glibc de la imagen) y podría quitarse. Solo se justifica si queremos módulos de terceros que se enchufen sin recompilar geko.
-3. **Las rutas comunes** (`/v1/attribution`, `/docs`, `/metrics`): servidas por cada módulo desde la SDK, o agregadas por un servicio pequeño del operador.
-4. **Ingress o Gateway API** (`HTTPRoute`), o los dos.
-5. **ConfigMap o CRD.** Un CRD `Geko` da `status` y validación, pero hay que instalarlo y versionarlo; el ConfigMap mantiene `geko.toml` tal cual.
-6. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md).
+1. **Ingress o Gateway API** (`HTTPRoute`), o los dos.
+2. **ConfigMap o CRD.** Un CRD `Geko` da `status` y validación, pero hay que instalarlo y versionarlo; el ConfigMap mantiene `geko.toml` tal cual.
+3. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md).
 
 ## Pasos
 
 1. **Medir con España** lo que comparten tiles y el geocoder: el tamaño de los extractos de OSM frente a las entradas globales de tiles, y el tiempo de lectura de OSM en cada build.
-2. **Decidir los puntos 1 y 2 de «Por decidir»**: de ellos depende todo lo demás.
+2. ~~**Decidir los puntos 1 y 2 de «Por decidir»**~~ Hecho (2026-10-26): una imagen por módulo, `DylibModule` se mantiene y las rutas comunes las sirve cada módulo (ver «Decidido»).
 3. **`[deploy] mode`** en `geko.toml`, con `single` por defecto y `operator` como error claro mientras no exista.
-4. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (punto 3 de «Por decidir»).
+4. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (ver «Decidido»).
 5. **`single` sobre el camino de bundles del operador**, con `BundleStore`.
 6. **Procesos separados en local** (`docker-compose` de ejemplo) para desarrollar el host.
 7. **`geko k8s render`** o un chart de Helm, con su prueba en `kind` o `k3d` en la CI.
