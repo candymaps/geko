@@ -113,6 +113,16 @@ rate_limit_per_s       = 0          # requests per second from one client addres
 rate_limit_burst       = 0          # burst above that rate (0: twice the rate)
 bundles_url            = ""         # HTTP address of bundles published on another machine; each reload pulls only what changed
 attribution_contact    = ""         # where to ask for the code of the derivative database (ODbL 4.6), in /v1/attribution
+
+# How geko is deployed (docs/OPERATOR_MODE_PLAN.md). The modules never read it.
+[deploy]
+mode = "single"                     # single: every module in one process, wherever it runs | operator: one deployment per module in Kubernetes
+                                    # (not implemented yet: with it, `geko serve|build|up` ask for `--module <name>`, one module per process)
+
+# [deploy.geocoder]                 # only the operator mode reads these
+# replicas = 2                      # default 1
+# cpu      = "500m"                 # Kubernetes quantities, as the pods ask for them
+# memory   = "4Gi"
 ```
 
 ## License

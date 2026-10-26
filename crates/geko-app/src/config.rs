@@ -20,6 +20,44 @@ pub struct Config {
     pub data: DataConfig,
     pub build: BuildConfig,
     pub serve: ServeConfig,
+    pub deploy: DeployConfig,
+}
+
+/// How geko is deployed (docs/OPERATOR_MODE_PLAN.md): `mode`, and a table per module with what only
+/// the operator mode uses. The modules never read it: they do not know which mode they run in.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct DeployConfig {
+    #[serde(default)]
+    pub mode: DeployMode,
+    /// `[deploy.<module>]`: replicas and resources of the pods of that module.
+    #[serde(flatten)]
+    pub modules: BTreeMap<String, ModuleDeploy>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum DeployMode {
+    /// Every module in one process, wherever it runs: Docker, a server, one pod.
+    #[default]
+    Single,
+    /// One deployment per module, in Kubernetes, with the build as a job.
+    Operator,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModuleDeploy {
+    #[serde(default = "one")]
+    pub replicas: u32,
+    /// Kubernetes quantities (`500m`, `4Gi`), as the pods ask for them.
+    #[allow(dead_code)] // read by `geko k8s render` (step 7 of the plan)
+    pub cpu: Option<String>,
+    #[allow(dead_code)]
+    pub memory: Option<String>,
+}
+
+fn one() -> u32 {
+    1
 }
 
 /// `geocoder = true`, or a table with the options of the module.
@@ -231,6 +269,12 @@ impl Config {
         for name in config.modules.keys() {
             ModuleName::new(name)?;
         }
+        for (name, deploy) in &config.deploy.modules {
+            ModuleName::new(name)?;
+            if deploy.replicas == 0 {
+                return Err(GekoError::Config(format!("deploy.{name}.replicas must be at least 1: to run none, disable the module in [modules]")));
+            }
+        }
         Ok(config)
     }
 
@@ -358,6 +402,29 @@ mod tests {
         let wrong_country = Config::parse("[[scope]]\ncountry = \"Spain\"\n").unwrap();
         assert!(wrong_country.scope().is_err());
         assert!(Config::parse("[[scope]]\ncountry = \"ES\"\nregion = [\"ES-B\"]\n").is_err());
+    }
+
+    #[test]
+    fn deploy_is_single_unless_it_says_otherwise() {
+        let c = Config::parse("").unwrap();
+        assert_eq!(c.deploy.mode, DeployMode::Single);
+        assert!(c.deploy.modules.is_empty());
+        let c = Config::parse("[deploy]\nmode = \"operator\"\n\n[deploy.geocoder]\nreplicas = 2\nmemory = \"4Gi\"\n\n[deploy.tiles]\ncpu = \"500m\"\n").unwrap();
+        assert_eq!(c.deploy.mode, DeployMode::Operator);
+        let geocoder = &c.deploy.modules["geocoder"];
+        assert_eq!((geocoder.replicas, geocoder.memory.as_deref(), geocoder.cpu.as_deref()), (2, Some("4Gi"), None));
+        let tiles = &c.deploy.modules["tiles"];
+        assert_eq!((tiles.replicas, tiles.cpu.as_deref()), (1, Some("500m")));
+        assert_eq!(Config::parse("[deploy]\nmode = \"single\"\n").unwrap().deploy.mode, DeployMode::Single);
+    }
+
+    #[test]
+    fn rejects_invalid_deploy() {
+        assert!(Config::parse("[deploy]\nmode = \"cluster\"\n").is_err());
+        assert!(Config::parse("[deploy]\nmod = \"operator\"\n").is_err());
+        assert!(Config::parse("[deploy.geocoder]\nreplicas = 0\n").is_err());
+        assert!(Config::parse("[deploy.geocoder]\nreplica = 2\n").is_err());
+        assert!(Config::parse("[deploy.Geocoder]\nreplicas = 2\n").is_err());
     }
 
     #[test]

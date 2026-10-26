@@ -17,15 +17,16 @@ use anyhow::Context;
 use clap::{Parser, Subcommand};
 use geko_module_sdk::module::{Module, ModuleName};
 
-use crate::config::Config;
+use crate::config::{Config, DeployMode};
 pub use crate::modules::Linked;
 use crate::modules::{Opened, Opener, Origin};
 
 #[derive(Parser)]
 #[command(name = "geko", version, about = "Geocoder and vector tile server")]
 struct Cli {
-    /// Comma-separated active modules; replaces the `[modules]` section.
-    #[arg(long, global = true, value_delimiter = ',')]
+    /// Comma-separated active modules; replaces the `[modules]` section. One module (`--module
+    /// geocoder`) is how a pod of the operator mode runs: it builds and serves only its own.
+    #[arg(long, global = true, value_delimiter = ',', alias = "module")]
     modules: Option<Vec<ModuleName>>,
     /// Log every step of a build, instead of its progress every 2 seconds.
     #[arg(long, global = true)]
@@ -193,6 +194,50 @@ fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Resul
     Ok(())
 }
 
+/// `[deploy] mode = "operator"` makes geko the control plane of a cluster, which does not exist yet
+/// (docs/OPERATOR_MODE_PLAN.md, step 10). Until it does, the commands that run every module in one
+/// process fail with what to do instead, rather than run in the other mode without a word. One
+/// module per process (`--module`) is how the pods of the operator mode run, so it goes on.
+fn check_deploy(config: &Config, cli: &Cli) -> anyhow::Result<()> {
+    let runs_every_module = matches!(cli.command, Command::Build { .. } | Command::Serve { .. } | Command::Up { .. });
+    if config.deploy.mode == DeployMode::Operator && runs_every_module && cli.modules.is_none() {
+        anyhow::bail!(
+            "[deploy] mode = \"operator\": geko as the operator of a cluster is not implemented yet. \
+             Run one module per process (`geko serve --module geocoder`, `geko build --module geocoder`), \
+             or set mode = \"single\" (the default) to run every module in this one"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checked(toml: &str, args: &[&str]) -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(std::iter::once("geko").chain(args.iter().copied())).unwrap();
+        check_deploy(&Config::parse(toml).unwrap(), &cli)
+    }
+
+    #[test]
+    fn operator_mode_asks_for_one_module_per_process() {
+        let operator = "[deploy]\nmode = \"operator\"\n";
+        for command in ["serve", "build", "up"] {
+            let err = checked(operator, &[command]).unwrap_err().to_string();
+            assert!(err.contains("--module"), "{command}: {err}");
+            assert!(checked(operator, &[command, "--module", "geocoder"]).is_ok(), "{command}");
+        }
+        assert!(checked(operator, &["plan"]).is_ok());
+        assert!(checked(operator, &["--modules", "geocoder,tiles", "serve"]).is_ok());
+    }
+
+    #[test]
+    fn single_mode_runs_every_module() {
+        assert!(checked("", &["serve"]).is_ok());
+        assert!(checked("[deploy]\nmode = \"single\"\n", &["up"]).is_ok());
+    }
+}
+
 /// Runs geko with the command line of this process and `linked`, the modules linked into it, which
 /// `GEKO_MODULES` comes before and the downloads after (`modules`).
 pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
@@ -216,6 +261,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
         config::CONFIG_PATH
     );
     let config = Config::load(&path)?;
+    check_deploy(&config, &cli)?;
     let active = modules::resolve(&config, cli.modules.as_deref())?;
     let mut opener = Opener::new(&config, &path, linked, modules::local()?);
     if std::env::var_os("GEKO_MODULES").is_some() {
