@@ -60,13 +60,20 @@ DEV_COMPOSE := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PO
                GEKO_DEV_VERSION=$(VERSION)-$(COMMIT)$(DIRTY) docker compose -f develop/compose.yaml
 DEV_K8S := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PORT) GEKO_DEV_MODULES=$(DEV_MODULES) develop/k8s-dev.sh
 
-.PHONY: help bin install serve up data image start-dev stop-dev release test test-changed
+# The dashboard that geko embeds (ci/ui.sh), rebuilt only when what it is made of changes.
+UI_SOURCES := $(shell find ui/src -type f) ui/index.html ui/package.json ui/package-lock.json ui/tsconfig.json ui/vite.config.ts
+ui/dist/index.html: $(UI_SOURCES)
+	ci/ui.sh
+
+.PHONY: help ui bin install serve up data image start-dev stop-dev release test test-changed
 
 help: ## This list
 	@grep -E "^[a-z-]+:.*## " $(MAKEFILE_LIST) | awk -F ":.*## " '{ printf "  make %-10s %s\n", $$1, $$2 }'
 	@echo "  Variables: LISTEN=$(LISTEN) IMAGE=$(IMAGE) REGISTRY=$(REGISTRY)"
 
-bin: ## Compile geko in release
+ui: ui/dist/index.html ## Compile the dashboard (ui/) in Docker, for geko to embed it
+
+bin: ui/dist/index.html ## Compile geko in release, with the dashboard
 	cargo build --release -p geko-app
 
 install: bin ## Install geko, /etc/geko/geko.toml (that of make start-dev, if there is none) and /var/lib/geko
@@ -74,7 +81,7 @@ install: bin ## Install geko, /etc/geko/geko.toml (that of make start-dev, if th
 	[ -f /etc/geko/geko.toml ] || sudo install -D -m 644 develop/geko.toml /etc/geko/geko.toml
 	[ -d /var/lib/geko ] || sudo install -d -o $$(id -un) -g $$(id -gn) /var/lib/geko
 
-serve: install ## Serve the published bundle on LISTEN (the demo page is at /)
+serve: install ## Serve the published bundle on LISTEN (the dashboard is at /)
 	$(GEKO) serve --listen $(LISTEN)
 
 up: install ## Serve, and build in the background what the configuration asks for (now and every max_age_days)
@@ -83,7 +90,7 @@ up: install ## Serve, and build in the background what the configuration asks fo
 data: install ## Download and build what the configuration asks for
 	$(GEKO) build
 
-image: ## Docker image IMAGE with geko alone, from a local release build (docker build compiles it instead): it downloads its modules
+image: ui/dist/index.html ## Docker image IMAGE with geko alone, from a local release build (docker build compiles it instead): it downloads its modules
 	cargo build --release -p geko-app
 	@$(call glibc,$(BIN))
 	rm -rf $(CARGO_TARGET_DIR)/image && mkdir -p $(CARGO_TARGET_DIR)/image
@@ -103,7 +110,7 @@ else ifeq ($(DEV_DEPLOY_MODE),single)
 	@mkdir -p "$(DEV_TILES_PROFILE)"
 	@case ",$(DEV_MODULES)," in *,tiles,*) "$(DEV_MODULES_DIR)/geko-tiles/ci/profile.sh" "$(DEV_TILES_PROFILE)" ;; esac
 	$(DEV_COMPOSE) up -d --build
-	@echo "geko-dev ($(DEV_MODULES)) builds, then serves http://localhost:$(DEV_PORT)/ (demo) and /docs (API). Its log follows; Ctrl-C leaves it running."
+	@echo "geko-dev ($(DEV_MODULES)) builds, then serves http://localhost:$(DEV_PORT)/ (dashboard) and /docs (API). Its log follows; Ctrl-C leaves it running."
 	$(DEV_COMPOSE) logs -f
 else
 	@echo "[deploy] mode = \"$(DEV_DEPLOY_MODE)\" in $(DEV_CONFIG): it is single or operator" >&2; exit 1

@@ -5,6 +5,7 @@
 
 mod access;
 mod metrics;
+mod ui;
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -239,8 +240,6 @@ impl BundleManager {
 /// those of the modules.
 const OPENAPI: &str = include_str!("../../../openapi.yaml");
 const DOCS: &str = include_str!("docs.html");
-/// `/`: a map with what the active modules offer (the geocoder's search), through their API.
-const DEMO: &str = include_str!("demo.html");
 
 /// Licenses and attributions of the served data (PROJECT.md §6): the sources of the bundle, whom
 /// to ask for the code that reproduces it, and what each module adds under its name.
@@ -382,8 +381,9 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
                 let body = module_list(&listed);
                 async move { Json(body) }
             }),
-        )
-        .route("/", get(|| async { axum::response::Html(DEMO) }));
+        );
+    // `/`: the dashboard (ui/), a map with what the active modules offer, through their API.
+    let shared_routes = ui::mount(shared_routes);
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
         let bundles = bundles.clone();
@@ -432,7 +432,9 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             async move { ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text) }
         }),
     );
-    let guard = access::Guard::new(access, public_paths(modules));
+    let mut public = public_paths(modules);
+    public.extend(ui::paths().map(str::to_owned));
+    let guard = access::Guard::new(access, public);
     // A panic in one request becomes a 500 for that request only.
     tracked
         .merge(metrics_route)
@@ -556,9 +558,6 @@ mod tests {
         assert_eq!(body["body"], "payload");
         assert_eq!(get_json(&app, "/v1/echo/x").await.0, StatusCode::NOT_FOUND, "only under its name");
 
-        let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
-        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/"), "the demo of the host");
         let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.headers()[header::LOCATION], "/fake/");
     }
@@ -575,6 +574,25 @@ mod tests {
         let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
         assert!(page.starts_with("<!doctype html>") && page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_is_served_at_the_root_without_a_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        let request = |encoding: &str| axum::http::Request::get("/").header(header::ACCEPT_ENCODING, encoding).body(Body::empty()).unwrap();
+
+        let res = app.clone().oneshot(request("identity")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
+        assert!(!res.headers().contains_key(header::CONTENT_ENCODING));
+        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(page.starts_with("<!doctype html>"), "{page}");
+
+        let res = app.oneshot(request("gzip")).await.unwrap();
+        // Without `ui/dist` at compile time the page that says so is small and not compressed.
+        if res.headers().contains_key(header::CONTENT_ENCODING) {
+            assert_eq!(&to_bytes(res.into_body(), 1 << 20).await.unwrap()[..2], &[0x1f, 0x8b]);
+        }
     }
 
     #[tokio::test]

@@ -18,3 +18,7 @@ tracing.workspace = true
 [dev-dependencies]
 tempfile = "3"
 tower.workspace = true
+
+[build-dependencies]
+# Gzips the dashboard at compile time (build.rs): deterministic, so the same files give the same binary.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

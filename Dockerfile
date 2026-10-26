@@ -18,9 +18,18 @@
 # modules of MODULES, built from their repositories (the build contexts `geocoder` and `tiles`)
 # against the SDK of this tree, in the image, so that it never downloads one.
 
+# The dashboard (ui/), which geko embeds: compiled here, in the Node of its package-lock.json.
+FROM node:22-slim AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
 FROM rust:1.99.0-bookworm AS build
 WORKDIR /src
 COPY . .
+COPY --from=ui /ui/dist ui/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
     cargo build --release --locked -p geko-app && mkdir /out && cp target/release/geko /out/geko
@@ -48,6 +57,7 @@ ARG GEKO_MODULE_VERSION=
 ARG PROFILE=ci
 WORKDIR /src
 COPY . .
+COPY --from=ui /ui/dist ui/dist
 # An empty GEKO_MODULE_VERSION is unset: empty, it would be the version of the modules. Each module
 # takes the SDK, geko-fetch and geko-artifact from this tree instead of its git dependency on the
 # repository of the host, which is private and may not have them yet.
