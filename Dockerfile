@@ -34,6 +34,9 @@ COPY --from=build /out/geko /geko
 # empty without them.
 FROM scratch AS geocoder
 FROM scratch AS tiles
+# The Planetiler profile of the tiles module (protomaps-basemap.jar and styles/, from its ci/profile.sh),
+# given as the build context tiles-profile by `make start-dev`; empty without it.
+FROM scratch AS tiles-profile
 
 # geko and the modules of MODULES (comma-separated), each as the library that geko loads, as
 # GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
@@ -53,6 +56,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=geko-target-local,target=/src/target \
     --mount=type=bind,from=geocoder,target=/modules/geocoder \
     --mount=type=bind,from=tiles,target=/modules/tiles \
+    --mount=type=bind,from=tiles-profile,target=/profile/tiles \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
     cargo build --profile $PROFILE --locked -p geko-app --bin geko; \
@@ -63,7 +67,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
       sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko\(\.git\)\{0,1\}"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
       package=$(find . -name module.toml -not -path './target/*' | head -1); \
       entry=$(sed -n 's/^entry *= *"\(.*\)"/\1/p' "$package"); \
-      cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
+      profile=; \
+      if [ "$m" = tiles ]; then \
+        [ -f /profile/tiles/protomaps-basemap.jar ] || { echo "module tiles: no Planetiler profile in the build context tiles-profile (make start-dev builds it with ci/profile.sh of its repository)" >&2; exit 1; }; \
+        profile=/profile/tiles/protomaps-basemap.jar; \
+      fi; \
+      env ${profile:+GEKO_TILES_PROFILE=$profile} cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
       mkdir /out/modules/$m; cp "/src/target/modules/$PROFILE/$entry" "$package" /out/modules/$m/; \
       cd /src; \
     done

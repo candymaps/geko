@@ -48,7 +48,11 @@ DEV_PORT    ?= 8080
 DEV_MODULES_DIR ?= $(abspath ..)
 DEV_CONFIG  ?= develop/geko.toml
 DEV_MODULES ?= $(shell awk '/^\[/ { on = ($$1 == "[modules]") } on && $$2 == "=" && $$3 == "true" { print $$1 }' $(DEV_CONFIG) | paste -sd, -)
+# The Planetiler profile of the tiles module (its jar and styles), which its ci/profile.sh builds
+# in Docker and the module is compiled with.
+DEV_TILES_PROFILE ?= $(CARGO_TARGET_DIR)/geko-dev-tiles-profile
 DEV_COMPOSE := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PORT) GEKO_DEV_MODULES=$(DEV_MODULES) GEKO_DEV_MODULES_DIR="$(DEV_MODULES_DIR)" \
+               GEKO_DEV_TILES_PROFILE="$(DEV_TILES_PROFILE)" \
                GEKO_DEV_VERSION=$(VERSION)-$(COMMIT)$(DIRTY) docker compose -f develop/compose.yaml
 
 .PHONY: help bin install serve up data image start-dev stop-dev release test test-changed
@@ -84,6 +88,8 @@ image: ## Docker image IMAGE with geko alone, from a local release build (docker
 start-dev: ## Build geko and DEV_MODULES (their repositories in DEV_MODULES_DIR, with the SDK of this tree) inside Docker and (re)create the container of develop/compose.yaml with DEV_CONFIG
 	@[ -n "$(DEV_MODULES)" ] || { echo "no module enabled in $(DEV_CONFIG): DEV_MODULES=geocoder,…" >&2; exit 1; }
 	@docker rm -f geko-dev > /dev/null 2>&1 || true
+	@mkdir -p "$(DEV_TILES_PROFILE)"
+	@case ",$(DEV_MODULES)," in *,tiles,*) "$(DEV_MODULES_DIR)/geko-tiles/ci/profile.sh" "$(DEV_TILES_PROFILE)" ;; esac
 	$(DEV_COMPOSE) up -d --build
 	@echo "geko-dev ($(DEV_MODULES)) builds, then serves http://localhost:$(DEV_PORT)/ (demo) and /docs (API). Its log follows; Ctrl-C leaves it running."
 	$(DEV_COMPOSE) logs -f
