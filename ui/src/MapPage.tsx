@@ -92,7 +92,6 @@ export function MapPage({ geocoder, tiles, active }: Props) {
         center: base.center,
         zoom: base.zoom,
         maxZoom: 19,
-        maxBounds: base.bounds,
         attributionControl: false,
       });
       map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: credit || undefined }));
