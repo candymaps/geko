@@ -60,6 +60,14 @@ En modo operador, las peticiones van del Ingress al pod del módulo, sin pasar p
 
 El mismo contrato y el mismo `Context` en los dos modos, nunca un `if mode == operator` en un módulo. Toda la diferencia queda en el host.
 
+### Los bundles van en un PVC compartido, de momento (2026-10-26)
+
+El almacenamiento de bundles del modo operador es un `PVC` con acceso `ReadWriteMany`: el Job de build escribe en él y los pods de cada módulo lo montan para leer y recargar, aunque estén en nodos distintos. Un `ReadWriteOnce` no vale: solo se monta en un nodo a la vez.
+
+- **Por qué un PVC:** es lo que menos añade. Sin cliente de objetos ni credenciales, y el `BundleStore` es el de disco local con otra ruta.
+- **Lo que exige:** un cluster con una clase de almacenamiento `ReadWriteMany` (NFS, CephFS, Azure Files, EFS, Filestore…). No todos la tienen.
+- **S3 queda para después**, como segundo `BundleStore` (paso 8), si un cluster no ofrece `ReadWriteMany` o el PVC no basta. El operador no lo necesita para empezar.
+
 ### `single` usa el mismo camino que el operador
 
 El build publica un bundle y el servicio lo detecta y lo recarga, con la misma abstracción (`BundleStore`): disco local en `single`, PVC o HTTP (`bundles_url`) en el operador. Así se desarrolla en `single` sobre el mismo camino que llega a producción.
@@ -71,7 +79,7 @@ El build publica un bundle y el servicio lo detecta y lo recarga, con la misma a
 1. **El operador**: un `Deployment` de una réplica que ejecuta geko con `[deploy] mode = "operator"`. No atiende peticiones de usuarios.
 2. **El ConfigMap `geko`**: `geko.toml` y, si los hay, los `geko-<módulo>.toml`. Es lo único que se configura.
 3. **RBAC**: un `ServiceAccount` que puede crear y borrar `Deployment`, `Service`, `Job`, `CronJob`, `PVC` e `Ingress` o `HTTPRoute`, solo en su namespace.
-4. **Almacenamiento de bundles**: un `PVC` de lectura y escritura compartida, o un bucket S3 o compatible (punto 43 de PROJECT.md).
+4. **Almacenamiento de bundles**: un `PVC` `ReadWriteMany` (ver «Decidido»). Un bucket S3 o compatible (punto 43 de PROJECT.md) queda para más adelante.
 5. **Los pods de cada módulo y del build los crea el operador**: no están en el kustomization.
 
 ```yaml
@@ -183,8 +191,7 @@ Por eso:
 3. **Las rutas comunes** (`/v1/attribution`, `/docs`, `/metrics`): servidas por cada módulo desde la SDK, o agregadas por un servicio pequeño del operador.
 4. **Ingress o Gateway API** (`HTTPRoute`), o los dos.
 5. **ConfigMap o CRD.** Un CRD `Geko` da `status` y validación, pero hay que instalarlo y versionarlo; el ConfigMap mantiene `geko.toml` tal cual.
-6. **El almacenamiento de bundles**: PVC compartido (no todos los clusters lo tienen) o S3 (punto 43 de PROJECT.md).
-7. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md).
+6. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md).
 
 ## Pasos
 
@@ -195,7 +202,7 @@ Por eso:
 5. **`single` sobre el camino de bundles del operador**, con `BundleStore`.
 6. **Procesos separados en local** (`docker-compose` de ejemplo) para desarrollar el host.
 7. **`geko k8s render`** o un chart de Helm, con su prueba en `kind` o `k3d` en la CI.
-8. **`BundleStore` con S3** (punto 43 de PROJECT.md), si el PVC compartido no basta.
+8. **`BundleStore` con S3** (punto 43 de PROJECT.md), solo si un cluster no ofrece `ReadWriteMany` o el PVC no basta.
 9. **El operador** (`kube-rs`), cuando haya alguien que lo pida, con la misma prueba en la CI que el paso 7.
 
 ## Coste del operador
