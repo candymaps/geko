@@ -1,0 +1,72 @@
+# The operator mode in a kind cluster (docs/OPERATOR_MODE_PLAN.md, step 8): the same `make start-dev`
+# as a developer runs with `[deploy] mode = "operator"`, on Luxembourg (deploy/overlays/ci), and then
+# ci/operator.sh: each module answers, one that falls does not take the other, each scales on its
+# own. It builds both modules inside Docker from their repositories, so it needs a token that reads
+# them: the secret GEKO_MODULES_TOKEN (contents of candymaps/geko-geocoder and candymaps/geko-tiles).
+# Without it, the job says so and passes: a check that cannot run is not one that failed.
+#
+# It is not a required status of main or dev (it takes tens of minutes), and runs only for what
+# can change it, or by hand.
+name: operator
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - deploy/**
+      - develop/k8s-dev.sh
+      - ci/operator.sh
+      - crates/geko-app/src/k8s.rs
+      - crates/geko-app/src/config.rs
+      - crates/geko-app/src/bundle*.rs
+      - crates/geko-server/**
+      - Dockerfile
+      - Makefile
+      - .github/workflows/operator.yml
+
+concurrency:
+  group: operator-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      MODULES_TOKEN: ${{ secrets.GEKO_MODULES_TOKEN }}
+    steps:
+      - id: token
+        run: |
+          if [ -n "$MODULES_TOKEN" ]; then echo "run=1" >> "$GITHUB_OUTPUT"; else echo "::notice::GEKO_MODULES_TOKEN is not set: the operator mode is not checked"; fi
+      - if: steps.token.outputs.run == '1'
+        uses: actions/checkout@v4
+      - if: steps.token.outputs.run == '1'
+        uses: actions/checkout@v4
+        with:
+          repository: candymaps/geko-geocoder
+          path: modules/geko-geocoder
+          token: ${{ secrets.GEKO_MODULES_TOKEN }}
+      - if: steps.token.outputs.run == '1'
+        uses: actions/checkout@v4
+        with:
+          repository: candymaps/geko-tiles
+          path: modules/geko-tiles
+          token: ${{ secrets.GEKO_MODULES_TOKEN }}
+      # kind and kubectl are on the image of the runner.
+      - if: steps.token.outputs.run == '1'
+        run: kind version && kubectl version --client
+      - if: steps.token.outputs.run == '1'
+        env:
+          GEKO_DEV_FOLLOW: "0"
+        run: make start-dev DEV_CONFIG=deploy/overlays/ci/geko.toml DEV_MODULES_DIR="$PWD/modules"
+      - if: steps.token.outputs.run == '1'
+        run: ci/operator.sh
+      - if: always() && steps.token.outputs.run == '1'
+        run: |
+          kubectl --context kind-geko-dev -n geko get pods -o wide || true
+          kubectl --context kind-geko-dev -n geko logs -l app.kubernetes.io/part-of=geko --prefix --tail=40 --max-log-requests=10 || true
+      - if: always() && steps.token.outputs.run == '1'
+        run: develop/k8s-dev.sh down --purge

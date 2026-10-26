@@ -131,7 +131,9 @@ mode = "single"                     # single: every module in one process, where
 
 Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
 
-To try it without Kubernetes, `develop/compose-split.yaml` runs it as the cluster would: a build job per module, one after the other, a server per module and an nginx that sends each path to its module (`GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build`, with the same variables as `make start-dev`).
+To develop it as it runs in Kubernetes, put `[deploy] mode = "operator"` in the configuration of `make start-dev` (`develop/geko.toml`, or `DEV_CONFIG=…`): the same command then makes a local kind cluster (`geko-dev`) if there is none, loads the image into it, applies the manifests that `geko k8s render` writes from that configuration (a pod per module, a build job per module, one volume for the data, `deploy/`), builds each module one after the other, and serves it all at the same `http://localhost:8080/`. `make stop-dev` deletes what runs and keeps the cluster and its volume; `make stop-dev PURGE=1` deletes the cluster. It needs `docker`, `kind` and `kubectl`, and says so if one is missing. The `operator` workflow runs this on Luxembourg, and `ci/operator.sh` checks that a module that falls does not take the other with it and that each scales on its own.
+
+Without a cluster, `develop/compose-split.yaml` runs it as the cluster would: a build job per module, one after the other, a server per module and an nginx that sends each path to its module (`GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build`, with the same variables as `make start-dev`).
 
 ## License
 

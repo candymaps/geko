@@ -4,10 +4,14 @@ namespace: geko
 resources:
   - ../../base
   - namespace.yaml
+  - gateway.yaml
 configMapGenerator:
   - name: geko
     files:
       - geko.toml
+  - name: gateway
+    files:
+      - gateway.conf
 # The image of `make start-dev` (geko with both modules, loaded into the cluster) serves for each.
 images:
   - name: ghcr.io/candymaps/geko-geocoder
