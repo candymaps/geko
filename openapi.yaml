@@ -4,12 +4,12 @@ info:
   version: "1"
   summary: Geocoder and vector tile server.
   description: |
-    What every module of geko shares: health, metrics and the attribution of the served data.
+    What every module of geko shares: health, readiness, metrics and the attribution of the served data.
     Each active module serves its own routes under its name (`/geocoder/…`, `/tiles/…`), with its
     own reference at `/<module>/openapi.yaml`; `/docs` browses them all.
 
     With `[serve] api_keys`, a request carries a key (`Authorization: Bearer`, `X-Api-Key` or
-    `api_key=`), except `/`, `/health`, `/v1/attribution` and the pages of the modules.
+    `api_key=`), except `/`, `/health`, `/ready`, `/v1/attribution` and the pages of the modules.
 servers:
   - url: /
     description: The geko serving this document
@@ -83,6 +83,24 @@ paths:
                   status: { type: string, const: ok }
                   modules: { type: array, items: { type: string, enum: [geocoder, tiles] } }
                   bundle: { type: [string, "null"], description: Version of the bundle served; null before the first one is published. }
+  /ready:
+    get:
+      summary: Readiness. Whether this server can answer, once it has loaded its bundle. Never needs an API key.
+      description: |
+        `/health` says the process is alive, from the start; `/ready` says it can answer: a bundle is
+        loaded, it has the part of every module served here, and none of them says it is unavailable.
+        The probe that keeps a pod out of the balancer until then (docs/OPERATOR_MODE_PLAN.md).
+      responses:
+        "200":
+          description: Ready.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ready" }
+        "503":
+          description: Not ready; `waiting` says for what.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Ready" }
   /metrics:
     get:
       summary: Metrics in the Prometheus text format.
@@ -97,3 +115,14 @@ paths:
           content:
             text/plain:
               schema: { type: string }
+components:
+  schemas:
+    Ready:
+      type: object
+      properties:
+        ready: { type: boolean }
+        bundle: { type: [string, "null"], description: Version of the bundle served; null before one is loaded. }
+        waiting:
+          type: array
+          items: { type: string }
+          description: What it waits for; empty when ready.

@@ -48,7 +48,7 @@ impl Guard {
 
     fn authorized(&self, request: &Request) -> bool {
         let path = request.uri().path();
-        let public = matches!(path, "/" | "/health") || path.starts_with("/v1/attribution") || self.public.contains(path);
+        let public = matches!(path, "/" | "/health" | "/ready") || path.starts_with("/v1/attribution") || self.public.contains(path);
         if self.access.api_keys.is_empty() || public {
             return true;
         }
