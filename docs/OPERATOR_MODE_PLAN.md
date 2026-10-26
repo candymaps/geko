@@ -24,13 +24,21 @@ Para saber si el host aporta algo más allá de la comodidad, se miró qué dato
 | Polígonos de agua y tierra (osmdata), Natural Earth, landcover, qrank | ❌ | ✅ |
 | La fuente única fusionada (una entidad por calle o dirección) | ✅ la genera | ❌ no la usa |
 
-- **Solo se comparte la descarga del PBF.** Con Baleares, 47 MB de los 2,35 GB de entradas de tiles (alrededor del 2 %). Cada módulo lo lee con su propio lector (Planetiler en Java, `osmpbf` en Rust): las pasadas de OSM no se comparten.
+- **Solo se comparte la descarga del PBF.** Medido el 2026-10-26: con Baleares son 47 MB de unos 2,1 GB de entradas globales de tiles (alrededor del 2 %); con España y Canarias, 1,56 GB frente a esos 2,1 GB (alrededor del 40 %). La cifra anterior de 2,35 GB era previa a bajar Natural Earth por capas (de 446 a 72 MB). Cada módulo lo lee con su propio lector (Planetiler en Java, `osmpbf` en Rust): las pasadas de OSM no se comparten, y con España son una parte importante del build que aún no está medida por módulo.
 - **La fuente única fusionada es interna del geocoder.** Tiles no podría usarla: ningún módulo depende de otro (PROJECT.md §2.2).
 - **Lo que de verdad comparten es infraestructura:** el `Downloader`, los artefactos firmados, las etapas incrementales, los bundles con recarga en caliente y lo común del servicio HTTP. Ya vive en crates (`geko-module-sdk`, `geko-fetch`, `geko-artifact`).
 
 Por los datos, nada obliga a que los módulos compartan proceso. El valor del host está en la infraestructura común, en el «todo en uno» para despliegues pequeños y en un solo punto de configuración.
 
-Sin comprobar: si la caché `raw/` comparte de verdad el PBF entre módulos (la misma ruta `raw/<fuente>/`; el punto 48 de PROJECT.md propone carpetas por módulo, que lo romperían), y las cifras con España.
+### La caché `raw/` ya comparte el PBF (medido el 2026-10-26)
+
+Los dos módulos guardan el extracto en la misma ruta, `raw/osm/<id>-latest.osm.pbf`, con la misma URL de Geofabrik y el mismo `.md5`. En el volumen de desarrollo hay una sola copia y una sola ficha `.raw.json`. El `Downloader` decide reutilizar por la ruta, la ficha (misma URL y mismo tamaño) y un GET condicional; el checksum solo se comprueba al terminar una descarga. Pero compartirlo con seguridad exige resolver esto:
+
+- **`keep_downloads = false` es el valor por defecto.** Tras publicar, cada módulo borra el PBF y deja la ficha. El otro módulo ve la ficha sin fichero y lo vuelve a bajar. En un `raw/` común solo se comparte con `keep_downloads = true` o si el borrado lo decide el host.
+- **Descargas a la vez sobre el mismo destino se pisan** (`<destino>.part`): dos Jobs de build que comparten `raw/` hay que serializarlos o darles un bloqueo.
+- **`geko build --purge` del geocoder borra lo de tiles** en `raw/` (`osmdata`, `natural-earth`, `planetiler`…) y los PBF fuera de su ámbito, porque solo conserva las carpetas de sus fuentes. Es un fallo que hay que corregir, o un requisito, si se comparte.
+- **Cada módulo decide su política de refresco.** En la corrida de Baleares, el geocoder construyó con el extracto del 22-10 y tiles recibió uno nuevo que sobrescribió el fichero: dos módulos con instantáneas distintas de OSM. Habría que decidir si el host impone una política común.
+- **El punto 48 de PROJECT.md** (carpetas por módulo) rompería la compartición.
 
 ## Decidido
 
@@ -238,11 +246,11 @@ Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` 
 
 1. **Ingress o Gateway API** (`HTTPRoute`), o los dos.
 2. **ConfigMap o CRD.** Un CRD `Geko` da `status` y validación, pero hay que instalarlo y versionarlo; el ConfigMap mantiene `geko.toml` tal cual.
-3. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md).
+3. **Si la caché `raw/` se comparte** entre los Jobs de build de distintos módulos, o cada uno baja lo suyo (afecta al punto 48 de PROJECT.md). Compartirla pide un `raw/` común en el PVC con `keep_downloads = true` (o el borrado en el host), serializar las descargas, arreglar el `--purge` del geocoder y una política de refresco común. Si no, cada Job baja lo suyo: con España son 1,56 GB más por módulo.
 
 ## Pasos
 
-1. **Medir con España** lo que comparten tiles y el geocoder: el tamaño de los extractos de OSM frente a las entradas globales de tiles, y el tiempo de lectura de OSM en cada build.
+1. **Medir con España** lo que comparten tiles y el geocoder. Hecho (2026-10-26): los tamaños de los extractos frente a las entradas globales de tiles, y que `raw/` ya comparte el PBF, con condiciones (ver «Qué comparten los módulos»). Pendiente: el tiempo de lectura de OSM en cada build con España. No hay medida que lo separe del resto, y hacerla pide una ejecución con España de cada módulo (30 a 45 min en total, 20 a 40 GB de disco y unos 4-5 GB de RAM de pico, de una en una).
 2. ~~**Decidir los puntos 1 y 2 de «Por decidir»**~~ Hecho (2026-10-26): una imagen por módulo, `DylibModule` se mantiene y las rutas comunes las sirve cada módulo (ver «Decidido»).
 3. **`[deploy] mode`** en `geko.toml`, con `single` por defecto y `operator` como error claro mientras no exista.
 4. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (ver «Decidido»).
