@@ -6,6 +6,8 @@
 #   ci/test.sh [--variant <variants>]
 #
 # --variant, what is checked, comma-separated (default: all of them):
+#   ui            the dashboard (ui/): typechecks and compiles it (ci/ui.sh, in Docker); it runs first,
+#                 so that the checks below compile geko with it embedded
 #   code          clippy (warnings are errors), dependency rules (what each crate of the host and
 #                 each technology may use), and licenses and security advisories (cargo-deny)
 #   contracts     unit tests and the conformance suites of the SDK: the module contract through
@@ -70,7 +72,7 @@ deny() {
     "$bin" --locked check
 }
 
-ALL_VARIANTS=code,contracts
+ALL_VARIANTS=ui,code,contracts
 VARIANTS=$ALL_VARIANTS
 
 usage() { echo "usage: $0 [--variant $ALL_VARIANTS]" >&2; }
@@ -107,6 +109,7 @@ run() {
     [ "$status" = 0 ] || FAILED+=("$name")
 }
 
+wants ui && run ui ci/ui.sh
 if wants code; then
     run lint lint
     run architecture architecture

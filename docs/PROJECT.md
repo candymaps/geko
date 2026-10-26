@@ -181,7 +181,7 @@ Los ficheros de un bundle bajo un directorio `hot/` se fijan en RAM al cargarlos
 Las rutas del host están en [openapi.yaml](../openapi.yaml), servida en `/openapi.yaml`; las de cada módulo, en el suyo (`openapi` de su `describe`). `/docs` (Swagger UI) las muestra todas.
 
 ```
-GET  /                  página de demostración (lo que ofrecen los módulos activos)
+GET  /                  el dashboard (ui/): el mapa y una pestaña por cada módulo activo; incrustado en el binario
 GET  /v1/attribution
 GET  /openapi.yaml, /docs
 GET  /health            módulos, versiones y los que no están disponibles (modules_unavailable)
@@ -267,7 +267,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 - **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
 - **Teselas** (2026-10-26): `tiles` publicado (`0.1.0`), en `ci/modules` y activo por defecto, como el geocoder.
-- **Servicio:** página de demostración en `/`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
+- **Servicio:** dashboard en `/` (`ui/`, incrustado en el binario) y `GET /admin/api/modules`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
 ## 19. Comprobaciones
 
