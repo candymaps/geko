@@ -74,7 +74,7 @@ El almacenamiento de bundles del modo operador es un `PVC` con acceso `ReadWrite
 
 - **Por qué un PVC:** es lo que menos añade. Sin cliente de objetos ni credenciales, y el `BundleStore` es el de disco local con otra ruta.
 - **Lo que exige:** un cluster con una clase de almacenamiento `ReadWriteMany` (NFS, CephFS, Azure Files, EFS, Filestore…). No todos la tienen.
-- **S3 queda para después**, como segundo `BundleStore` (paso 8), si un cluster no ofrece `ReadWriteMany` o el PVC no basta. El operador no lo necesita para empezar.
+- **S3 queda para después**, como segundo `BundleStore` (paso 9), si un cluster no ofrece `ReadWriteMany` o el PVC no basta. El operador no lo necesita para empezar.
 
 ### Una imagen por módulo (2026-10-26)
 
@@ -216,7 +216,7 @@ Por eso:
 Para que lo que se sube y lo que se prueba sea idéntico, los manifiestos tienen **una sola fuente**:
 
 - `deploy/` con una base de kustomize (un `Deployment` y un `Service` por módulo, el `CronJob` de build, el PVC y las rutas) y overlays `local`, `ci` y `prod`. Entre overlays solo cambia lo inevitable (réplicas, dominio, clase de almacenamiento) y `[deploy]` de `geko.toml`.
-- Si se usa `geko k8s render` (paso 7), su salida es esa base, y el operador (paso 9) reconcilia lo mismo.
+- Si se usa `geko k8s render` (paso 7), su salida es esa base, y el operador (paso 10) reconcilia lo mismo.
 - **Sin cluster, en cada PR:** `kustomize build` de cada overlay validado con `kubeconform`, y un diff contra los YAML versionados que falla si se cambia el código sin regenerarlos.
 - **Con cluster, en la CI y en local:** crear `kind` o `k3d`, cargar las imágenes del árbol de trabajo (`kind load docker-image` o `k3d image import`, sin registro), `kubectl apply -k deploy/overlays/<overlay>`, esperar a los pods y consultar `/geocoder/` y `/tiles/`. Comprobaciones: tirar el pod de un módulo y ver que el otro sigue respondiendo; subir las réplicas de `geocoder` a 3 y ver que `tiles` se queda en 1.
 
@@ -238,7 +238,7 @@ Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` 
 - **Misma experiencia:** el mismo comando, la misma URL y la misma configuración. Solo cambia `[deploy] mode`.
 - **Idempotente:** si el cluster o las imágenes ya están, se reaprovechan; un cambio de código solo reconstruye la imagen y reinicia los pods.
 - **Sin sorpresas:** si falta `kind` o `k3d`, o `kubectl`, `make start-dev` dice qué instalar y no hace nada a medias. Sin `[deploy]`, es `single`.
-- **Hasta el paso 9** no hay operador: el modo `operator` de desarrollo aplica los manifiestos del paso 7, que son los mismos que reconciliaría el operador. Cuando exista, el overlay `local` lo desplegará dentro del cluster.
+- **Hasta el paso 10** no hay operador: el modo `operator` de desarrollo aplica los manifiestos del paso 7, que son los mismos que reconciliaría el operador. Cuando exista, el overlay `local` lo desplegará dentro del cluster.
 - **Primera ejecución más lenta** (crear el cluster y construir las imágenes); las siguientes, no.
 - **Rutas con espacios** en el `Makefile`: hoy no se entrecomilla `DEV_CONFIG` y falla con rutas como `03 Candymaps`. Hay que arreglarlo al tocarlo.
 
@@ -250,16 +250,16 @@ Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` 
 
 ## Pasos
 
-1. **Medir con España** lo que comparten tiles y el geocoder. Hecho (2026-10-26): los tamaños de los extractos frente a las entradas globales de tiles, y que `raw/` ya comparte el PBF, con condiciones (ver «Qué comparten los módulos»). Pendiente: el tiempo de lectura de OSM en cada build con España. No hay medida que lo separe del resto, y hacerla pide una ejecución con España de cada módulo (30 a 45 min en total, 20 a 40 GB de disco y unos 4-5 GB de RAM de pico, de una en una).
+1. ~~**Medir con España** lo que comparten tiles y el geocoder~~ Hecho (2026-10-26): los tamaños de los extractos frente a las entradas globales de tiles, y que `raw/` ya comparte el PBF, con condiciones (ver «Qué comparten los módulos»). El `--purge` del geocoder que borraba el `raw/` de tiles ya está corregido (rama `bugfix/purge-keeps-other-modules-raw` de `geko-geocoder`). **El tiempo de lectura de OSM con España se deja para el final** (paso 8): no cambia ninguna decisión, y hacerlo pide una ejecución con España de cada módulo (30 a 45 min, 20 a 40 GB de disco y unos 4-5 GB de RAM de pico, de una en una). Se medirá ya dentro del cluster local, para fijar los `requests` y `limits` de los Jobs de build en `[deploy.<módulo>]`.
 2. ~~**Decidir los puntos 1 y 2 de «Por decidir»**~~ Hecho (2026-10-26): una imagen por módulo, `DylibModule` se mantiene y las rutas comunes las sirve cada módulo (ver «Decidido»).
 3. **`[deploy] mode`** en `geko.toml`, con `single` por defecto y `operator` como error claro mientras no exista.
-4. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (ver «Decidido»).
-5. **`single` sobre el camino de bundles del operador**, con `BundleStore`.
+4. **`single` sobre el camino de bundles del operador**, con `BundleStore`. Antes que el servicio por módulo: `geko serve --module` lee los bundles por ese camino.
+5. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (ver «Decidido»).
 6. **Procesos separados en local** (`docker-compose` de ejemplo) para desarrollar el host.
-7. **`geko k8s render`** o un chart de Helm, con su prueba en `kind` o `k3d` en la CI.
-7 bis. **`make start-dev` y `make stop-dev` según `[deploy] mode`**: `single` como hoy; `operator` crea el cluster local y aplica el overlay `local` de `deploy/` (ver «Los `make` de desarrollo siguen el modo»).
-8. **`BundleStore` con S3** (punto 43 de PROJECT.md), solo si un cluster no ofrece `ReadWriteMany` o el PVC no basta.
-9. **El operador** (`kube-rs`), cuando haya alguien que lo pida, con la misma prueba en la CI que el paso 7.
+7. **`deploy/` y los manifiestos**: la base de kustomize y los overlays `local`, `ci` y `prod`, o `geko k8s render` / un chart de Helm. Con comprobaciones sin cluster en cada PR (`kustomize build` con `kubeconform` y un diff contra los YAML versionados).
+8. **`make start-dev` y `make stop-dev` según `[deploy] mode`** (`single` como hoy; `operator` crea el cluster local y aplica el overlay `local`, ver «Los `make` de desarrollo siguen el modo»), y el job de CI con `kind` o `k3d` y Luxemburgo. Aquí se mide también el tiempo con España (paso 1).
+9. **`BundleStore` con S3** (punto 43 de PROJECT.md), solo si un cluster no ofrece `ReadWriteMany` o el PVC no basta.
+10. **El operador** (`kube-rs`), cuando haya alguien que lo pida, con la misma prueba en la CI que el paso 8.
 
 ## Coste del operador
 
