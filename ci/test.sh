@@ -10,6 +10,8 @@
 #                 each technology may use), and licenses and security advisories (cargo-deny)
 #   contracts     unit tests and the conformance suites of the SDK: the module contract through
 #                 its adapter (dylib), and the Downloader
+#   deploy        the manifests of deploy/ (ci/deploy.sh check): up to date with what geko k8s render
+#                 writes, and valid; without a cluster
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -70,7 +72,7 @@ deny() {
     "$bin" --locked check
 }
 
-ALL_VARIANTS=code,contracts
+ALL_VARIANTS=code,contracts,deploy
 VARIANTS=$ALL_VARIANTS
 
 usage() { echo "usage: $0 [--variant $ALL_VARIANTS]" >&2; }
@@ -113,6 +115,7 @@ if wants code; then
     run deny deny
 fi
 wants contracts && run test test
+wants deploy && run deploy ci/deploy.sh check
 if [ ${#FAILED[@]} -gt 0 ]; then
     echo "failed: ${FAILED[*]}" >&2
     exit 1

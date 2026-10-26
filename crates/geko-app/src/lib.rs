@@ -5,6 +5,7 @@ mod bundle;
 mod bundle_store;
 mod config;
 mod dylib;
+mod k8s;
 mod modules;
 mod progress;
 mod remote;
@@ -85,10 +86,34 @@ enum Command {
         #[command(subcommand)]
         what: Option<Purge>,
     },
+    /// What the operator mode puts in a Kubernetes cluster.
+    K8s {
+        #[command(subcommand)]
+        what: K8s,
+    },
     /// A command of an active module: `geko geocoder query "Calle Mayor 5"`; `geko <module>` lists
     /// them.
     #[command(external_subcommand)]
     Module(Vec<String>),
+}
+
+#[derive(Subcommand)]
+enum K8s {
+    /// Write the manifests for the active modules and `[deploy]` of the configuration to the
+    /// standard output: a deployment and a service per module, a cron job that builds it, the
+    /// volume they share and the Ingress. Needs no module downloaded, nor a cluster.
+    Render {
+        /// The image of a module is this prefix followed by its name.
+        #[arg(long, default_value = "ghcr.io/candymaps/geko-")]
+        image_prefix: String,
+        #[arg(long, default_value = "latest")]
+        tag: String,
+        /// Size of the volume of bundles and downloads, which every module shares.
+        #[arg(long, default_value = "20Gi")]
+        storage: String,
+        #[arg(long)]
+        storage_class: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Clone, Copy)]
@@ -235,6 +260,11 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     );
     let config = Config::load(&path)?;
     check_deploy(&config, &cli)?;
+    if let Command::K8s { what: K8s::Render { image_prefix, tag, storage, storage_class } } = &cli.command {
+        let options = k8s::Options { image_prefix: image_prefix.clone(), tag: tag.clone(), storage: storage.clone(), storage_class: storage_class.clone() };
+        print!("{}", k8s::render(&config, &options));
+        return Ok(());
+    }
     let active = modules::resolve(&config, cli.modules.as_deref())?;
     let mut opener = Opener::new(&config, &path, linked, modules::local()?);
     if std::env::var_os("GEKO_MODULES").is_some() {
@@ -301,6 +331,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
                 }
             }
         }
+        Command::K8s { .. } => unreachable!("rendered above, before any module is opened"),
         Command::Module(args) => module_command(&modules, &args)?,
     }
     Ok(())

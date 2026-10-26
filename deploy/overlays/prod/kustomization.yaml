@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# An example for a cluster with ReadWriteMany storage: the images of a version, more replicas of
+# the module that has more traffic, and what each pod and each build ask for. Copy it and change it.
+namespace: geko
+resources:
+  - ../../base
+configMapGenerator:
+  - name: geko
+    files:
+      - geko.toml
+images:
+  - name: ghcr.io/candymaps/geko-geocoder
+    newTag: latest
+  - name: ghcr.io/candymaps/geko-tiles
+    newTag: latest
+replicas:
+  - name: geko-geocoder
+    count: 3
+  - name: geko-tiles
+    count: 1
+patches:
+  - target:
+      kind: Deployment
+      name: geko-geocoder
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: 500m, memory: 4Gi }
+          limits: { memory: 4Gi }
+  - target:
+      kind: CronJob
+      name: geko-build-geocoder
+    patch: |-
+      - op: add
+        path: /spec/jobTemplate/spec/template/spec/containers/0/resources
+        value:
+          requests: { cpu: "2", memory: 6Gi }
+          limits: { memory: 6Gi }
+  - target:
+      kind: Ingress
+      name: geko
+    patch: |-
+      - op: add
+        path: /spec/rules/0/host
+        value: geko.example.org

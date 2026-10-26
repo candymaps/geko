@@ -1,0 +1,15 @@
+# The geko.toml of the check in CI (a kind cluster): Luxembourg, the smallest country with a golden,
+# so that the builds take minutes.
+[modules]
+geocoder = true
+tiles    = true
+
+[[scope]]
+country = "LU"
+
+[data]
+accept_licenses = true
+keep_downloads  = true
+
+[deploy]
+mode = "operator"

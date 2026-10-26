@@ -101,6 +101,11 @@ FROM base AS local
 COPY --from=build-local /out/geko /usr/local/bin/geko
 COPY --from=build-local /out/modules /usr/lib/geko/modules
 ENV GEKO_MODULES=/usr/lib/geko/modules
+# The country packs of the geocoder, from its repository (the build context geocoder): never
+# downloaded, as with GEKO_PACKS in develop/compose.yaml, which mounts them over this folder. A pod
+# of the local cluster (deploy/overlays/local) has no repository to mount them from.
+COPY --from=geocoder /countries /packs
+ENV GEKO_PACKS=/packs
 ARG VERSION=unknown
 ARG REVISION=unknown
 LABEL org.opencontainers.image.version=$VERSION

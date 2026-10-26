@@ -49,11 +49,13 @@ pub enum DeployMode {
 pub struct ModuleDeploy {
     #[serde(default = "one")]
     pub replicas: u32,
-    /// Kubernetes quantities (`500m`, `4Gi`), as the pods ask for them.
-    #[allow(dead_code)] // read by `geko k8s render` (step 7 of the plan)
+    /// Kubernetes quantities (`500m`, `4Gi`), as the pods that serve ask for them.
     pub cpu: Option<String>,
-    #[allow(dead_code)]
     pub memory: Option<String>,
+    /// The same for the job that builds: its peak is not that of serving, and it runs apart from the
+    /// pods that serve.
+    pub build_cpu: Option<String>,
+    pub build_memory: Option<String>,
 }
 
 fn one() -> u32 {
