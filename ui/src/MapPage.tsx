@@ -92,6 +92,7 @@ export function MapPage({ geocoder, tiles, active }: Props) {
         center: base.center,
         zoom: base.zoom,
         maxZoom: 19,
+        maxBounds: base.bounds,
         attributionControl: false,
       });
       map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: credit || undefined }));
@@ -142,7 +143,7 @@ export function MapPage({ geocoder, tiles, active }: Props) {
     dots.current.forEach((d) => d.remove());
     dots.current = results.map((f) => {
       const el = document.createElement("div");
-      el.className = "dot";
+      el.className = "dot-pin";
       el.title = f.properties.label ?? f.properties.name;
       return new maplibregl.Marker({ element: el }).setLngLat(f.geometry.coordinates).addTo(map);
     });

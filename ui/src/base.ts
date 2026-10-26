@@ -4,6 +4,8 @@ export interface Base {
   style: StyleSpecification;
   center: [number, number];
   zoom: number;
+  /** The scope the tiles cover: the map neither pans nor zooms out past it, where it would show nothing. */
+  bounds?: [number, number, number, number];
 }
 
 interface Catalog {
@@ -70,7 +72,14 @@ async function tilesBase(): Promise<Base> {
   style.sprite = absolute(style.sprite);
   // The tiles cover the scope, not the whole of Spain: start there.
   const [lon, lat, zoom] = tilejson.center ?? [...SPAIN.center, SPAIN.zoom];
-  return { style, center: [lon, lat], zoom };
+  return { style, center: [lon, lat], zoom, bounds: tilejson.bounds && pad(tilejson.bounds) };
+}
+
+// A margin, so that the coast of the scope is not on the very edge of the screen.
+function pad([west, south, east, north]: [number, number, number, number]): [number, number, number, number] {
+  const dx = (east - west) * 0.1;
+  const dy = (north - south) * 0.1;
+  return [west - dx, south - dy, east + dx, north + dy];
 }
 
 /** The base map is the tiles module's own if it is active and answers, or else OpenStreetMap's. */

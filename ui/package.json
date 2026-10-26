@@ -8,6 +8,7 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
+    "lucide-preact": "^1.61.0",
     "maplibre-gl": "^5.0.0",
     "preact": "^10.26.0"
   },
