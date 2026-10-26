@@ -1,6 +1,6 @@
 # Dashboard: plan
 
-Estado: la primera entrega está hecha en `feature/dashboard` (2026-10-26): el shell, el mapa, una pestaña vacía por módulo activo y el ámbito (`scope`) que el host sirve. Sustituye a la página de demostración (`demo.html`, retirada) por un dashboard que, con el tiempo, sea el panel de control del motor. Queda por hacer lo que dice «Después» y «Por decidir».
+Estado: la primera entrega está hecha en `feature/dashboard` (2026-10-26): el shell, el mapa, y una pestaña vacía por módulo activo. Sustituye a la página de demostración (`demo.html`, retirada) por un dashboard que, con el tiempo, sea el panel de control del motor. Queda por hacer lo que dice «Después» y «Por decidir».
 
 ## Objetivo
 
@@ -23,8 +23,7 @@ Estado: la primera entrega está hecha en `feature/dashboard` (2026-10-26): el s
 
 - El shell se sirve en `/`, sin clave de API, con sus ficheros. La navegación usa el hash (`#/tiles`), así que no hacen falta rutas de reserva en el servidor para los enlaces directos.
 - `GET /admin/api/modules`: los módulos activos, con su nombre, su versión viva y si no están disponibles.
-- `GET /admin/api/scope`: el área que cubren los módulos activos, `{"bounds": [oeste, sur, este, norte] | null}`.
-- Ambas rutas de `/admin/api/` van **detrás de la clave de API**, como cualquier ruta que no sea pública.
+- La ruta de `/admin/api/` va **detrás de la clave de API**, como cualquier ruta que no sea pública.
 
 ### El shell lo sirve el host (`single`) o el operador (`operator`)
 
@@ -38,19 +37,7 @@ Basado en el backoffice de GOIB: un sidebar fijo (272 px abierto, 74 px plegado;
 
 - MapLibre nativo. Con `tiles` activo y con estilo, dibuja nuestras teselas (estilo claro u oscuro e idioma del navegador); si no, OpenStreetMap.
 - El buscador del geocoder (autocompletar, búsqueda, geocodificación inversa, pin de foco y caja visible) solo aparece si `geocoder` está activo.
-- **Limitado al ámbito:** el mapa no se desplaza ni se aleja más allá de la caja del ámbito, con un margen (`MARGIN`, 25 %), de modo que no se ve «vacío» con las teselas vectoriales, que solo cubren el ámbito. Aplica también cuando las dibuja OpenStreetMap.
-
-### El ámbito lo declaran los módulos y lo une el host
-
-El host solo tiene el ámbito como códigos ISO, sin geometría, y no debe conocer las fuentes de cada módulo. Por eso cada módulo dice qué cubre su parte y el host las une:
-
-- **SDK:** `Built::bounds` y `BundleModule::bounds`, opcionales (`[oeste, sur, este, norte]` en grados). Es aditivo: un bundle anterior o un módulo que no lo sabe no declara ninguno, y el contrato no cambia. Cruza el adaptador de bibliotecas como JSON, donde un campo que falta es `None`.
-- **Host:** al cargar un bundle une las áreas de los módulos activos (`BundleManager::bounds`) y las sirve en `/admin/api/scope`. Un módulo apagado no cuenta.
-- **tiles:** declara la unión de las cajas del ámbito, que salen de las cabeceras de los extractos de OSM.
-- **geocoder:** el índice inverso guarda en su manifiesto la extensión de sus puntos y el build une las de los países. Es más ceñida que la de tiles (Baleares: 1,16 / 38,64 / 4,33 / 40,09, frente a 0,62 / 38,06 / 4,94 / 40,71) y no depende de que se hayan borrado las descargas.
-- **Dashboard:** usa el `bounds` del host; si no hay (un bundle anterior), el del `tilejson` de tiles; si tampoco, el centro de España como vista por defecto, la única constante del ámbito en la interfaz.
-- **Rendimiento:** solo toca metadatos. Servir teselas o buscar no cambia; el coste está en el build (leer una columna de extensión) y en el manifiesto (cuatro números por módulo).
-- **Efectos:** el manifiesto del índice inverso del geocoder cambia, así que su golden pedirá actualizar la línea base. Los módulos deben compilarse contra un SDK que tenga el campo, y los literales de `BundleModule` de sus tests y ejemplos piden `bounds: None`.
+- **Sin límite al ámbito:** el mapa se mueve y se aleja libremente. Vista inicial: el `center` del `tilejson` de tiles si está activo, o el centro de España.
 
 ### Cada módulo sirve su propia vista
 
@@ -82,9 +69,8 @@ Por ahora el dashboard no cambia nada. Las acciones (reconstruir, recargar bundl
 ## Por decidir
 
 1. **Claves de API.** Con claves activas, `/` y sus ficheros cargan sin clave, pero el dashboard llama a `/admin/api/*` y a las rutas de los módulos, y recibirían 401. Hace falta una forma de que el dashboard tenga la clave (un campo que la pida y la guarde, o una cabecera) sin dejarla en la URL.
-2. **Refrescar al llegar un bundle nuevo.** El dashboard lee la lista de módulos y el ámbito una sola vez; si se reconstruye con otro ámbito, hay que recargar la página. Un sondeo ligero de `/health` (que trae el bundle) lo cerraría.
-3. **Mover el tag del SDK.** Los módulos dependen de `sdk-<contrato>`; el campo nuevo solo existe en el árbol del host hasta que llegue a `dev` y el tag avance. Hasta entonces sus ramas `feature/declare-bounds` no compilan en su CI.
-4. **Lista de módulos en modo operador.** El endpoint lo responde el operador a partir del ConfigMap y del estado de los `Deployment`. Hay que decidirlo junto con las rutas comunes (OPERATOR_MODE_PLAN, «Por decidir», 3).
-5. **Compartir Preact** entre shell y paneles (*import map*) o paneles autocontenidos.
-6. **Brotli o gzip** para los estáticos incrustados, según la medida de tamaño y el coste de CPU al arrancar.
-7. **Un rectángulo único para el ámbito.** La unión de cajas de un ámbito con varias zonas separadas (Baleares y Canarias) deja huecos sin datos dentro de la caja. Es una limitación de usar una sola caja.
+2. **Refrescar al llegar un bundle nuevo.** El dashboard lee la lista de módulos una sola vez; si se reconstruye con otro ámbito, hay que recargar la página. Un sondeo ligero de `/health` (que trae el bundle) lo cerraría.
+3. **Lista de módulos en modo operador.** El endpoint lo responde el operador a partir del ConfigMap y del estado de los `Deployment`. Hay que decidirlo junto con las rutas comunes (OPERATOR_MODE_PLAN, «Por decidir», 3).
+4. **Compartir Preact** entre shell y paneles (*import map*) o paneles autocontenidos.
+5. **Brotli o gzip** para los estáticos incrustados, según la medida de tamaño y el coste de CPU al arrancar.
+6. **Limitar el mapa al ámbito.** Se probó (2026-10-26) que cada módulo declarase el área de su parte (`Built::bounds`) y que el host las uniera y las sirviera; se retiró. El host solo tiene el ámbito como códigos ISO, sin geometría, y no conoce las fuentes de cada módulo. Si se retoma, hace falta una fuente común de cajas por región; una sola caja, además, deja huecos con ámbitos separados (Baleares y Canarias).
