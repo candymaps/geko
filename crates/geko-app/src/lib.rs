@@ -211,34 +211,6 @@ fn check_deploy(config: &Config, cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn checked(toml: &str, args: &[&str]) -> anyhow::Result<()> {
-        let cli = Cli::try_parse_from(std::iter::once("geko").chain(args.iter().copied())).unwrap();
-        check_deploy(&Config::parse(toml).unwrap(), &cli)
-    }
-
-    #[test]
-    fn operator_mode_asks_for_one_module_per_process() {
-        let operator = "[deploy]\nmode = \"operator\"\n";
-        for command in ["serve", "build", "up"] {
-            let err = checked(operator, &[command]).unwrap_err().to_string();
-            assert!(err.contains("--module"), "{command}: {err}");
-            assert!(checked(operator, &[command, "--module", "geocoder"]).is_ok(), "{command}");
-        }
-        assert!(checked(operator, &["plan"]).is_ok());
-        assert!(checked(operator, &["--modules", "geocoder,tiles", "serve"]).is_ok());
-    }
-
-    #[test]
-    fn single_mode_runs_every_module() {
-        assert!(checked("", &["serve"]).is_ok());
-        assert!(checked("[deploy]\nmode = \"single\"\n", &["up"]).is_ok());
-    }
-}
-
 /// Runs geko with the command line of this process and `linked`, the modules linked into it, which
 /// `GEKO_MODULES` comes before and the downloads after (`modules`).
 pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
@@ -271,6 +243,9 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     let opener = Arc::new(opener);
     let opened = active.iter().map(|name| opener.open(name)).collect::<geko_module_sdk::Result<Vec<_>>>()?;
     let modules: Vec<Arc<dyn Module>> = opened.iter().map(|o| Arc::clone(&o.module)).collect();
+    // Naming the modules (`--module geocoder`) is building some of them: the bundle keeps the part
+    // of the others that the current one has.
+    let keep_others = cli.modules.is_some();
 
     match cli.command {
         Command::Plan => {
@@ -295,7 +270,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             if first_purge {
                 purge(&modules, geko_module_sdk::module::Purge::Data)?;
             }
-            print!("{}", run::build(&config, &modules, force, refresh)?);
+            print!("{}", run::build(&config, &modules, force, refresh, keep_others)?);
         }
         Command::Serve { listen } => serve(&config, &opener, &opened, listen)?,
         Command::Up { force, purge: first_purge, refresh, listen } => {
@@ -308,7 +283,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
                 m.ready()?;
             }
             let (builder, background) = (config.clone(), modules.clone());
-            std::thread::Builder::new().name("geko-build".into()).spawn(move || run::regenerate(&builder, &background, force, refresh))?;
+            std::thread::Builder::new().name("geko-build".into()).spawn(move || run::regenerate(&builder, &background, force, refresh, keep_others))?;
             serve(&config, &opener, &opened, listen)?;
         }
         Command::Purge { what } => {
@@ -329,4 +304,32 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
         Command::Module(args) => module_command(&modules, &args)?,
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn checked(toml: &str, args: &[&str]) -> anyhow::Result<()> {
+        let cli = Cli::try_parse_from(std::iter::once("geko").chain(args.iter().copied())).unwrap();
+        check_deploy(&Config::parse(toml).unwrap(), &cli)
+    }
+
+    #[test]
+    fn operator_mode_asks_for_one_module_per_process() {
+        let operator = "[deploy]\nmode = \"operator\"\n";
+        for command in ["serve", "build", "up"] {
+            let err = checked(operator, &[command]).unwrap_err().to_string();
+            assert!(err.contains("--module"), "{command}: {err}");
+            assert!(checked(operator, &[command, "--module", "geocoder"]).is_ok(), "{command}");
+        }
+        assert!(checked(operator, &["plan"]).is_ok());
+        assert!(checked(operator, &["--modules", "geocoder,tiles", "serve"]).is_ok());
+    }
+
+    #[test]
+    fn single_mode_runs_every_module() {
+        assert!(checked("", &["serve"]).is_ok());
+        assert!(checked("[deploy]\nmode = \"single\"\n", &["up"]).is_ok());
+    }
 }

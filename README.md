@@ -125,6 +125,12 @@ mode = "single"                     # single: every module in one process, where
 # memory   = "4Gi"
 ```
 
+### One module per process
+
+`geko serve --module geocoder` (`--module` is an alias of `--modules`) serves only the routes of that module, and `geko build --module geocoder` builds only its part. The bundle that build publishes keeps what the current one has of the other modules, so each module can build in a job of its own, with its own resources; publications into the same bundles directory wait for each other (`.publish.lock`). A build with no `--module` publishes exactly the modules that are active, as before.
+
+Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
+
 ## License
 
 geko is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). You may use, study, modify and share it freely. If you distribute it, modified or not, you must pass on its source code under the same license; if you modify it and let others use it over a network, you must offer them the source code of your version. Running it, or modifying it for internal use only, requires nothing more.

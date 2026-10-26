@@ -15,7 +15,7 @@ use geko_module_sdk::{GekoError, Result};
 use serde::Serialize;
 
 use crate::bundle::Published;
-use crate::bundle_store;
+use crate::bundle_store::{self, Build};
 use crate::config::Config;
 use crate::progress;
 
@@ -41,8 +41,9 @@ fn bundle_size(version: &str, artifacts: &[Artifact]) -> BundleSize {
 }
 
 /// Builds the part of every module, then publishes a bundle with them all, unless nothing changed
-/// since the current one.
-pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh: bool) -> Result<String> {
+/// since the current one. With `keep_others` (a build of some modules, `--module`), the bundle also
+/// keeps what the current one has of the others.
+pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh: bool, keep_others: bool) -> Result<String> {
     let mut out = String::new();
     let (mut stages, mut extra) = (Vec::new(), serde_json::Map::new());
     let (mut entries, mut parts, mut licenses): (Vec<BundleModule>, Vec<BundlePart>, Vec<LicenseNotice>) = Default::default();
@@ -77,7 +78,7 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
     let mut log = StageLog::new();
     let store = bundle_store::open(config);
     let bundles = store.dir().to_owned();
-    let published = store.publish(&parts, entries, licenses, force)?;
+    let published = store.publish(Build { parts: &parts, modules: entries, licenses, force, keep_others })?;
     let manifest = match &published {
         Published::New(manifest) => {
             writeln!(
@@ -119,10 +120,10 @@ fn write_report(dir: &Path, stages: Vec<geko_module_sdk::stages::StageRecord>, b
 /// sources are due for a check), for as long as the process lives. The server picks up each new
 /// bundle with its reload, and keeps the one it serves if a build fails. When no module expects
 /// anything to change, it builds once.
-pub fn regenerate(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh: bool) {
+pub fn regenerate(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh: bool, keep_others: bool) {
     let (mut force, mut refresh) = (force, refresh);
     loop {
-        match build(config, modules, force, refresh) {
+        match build(config, modules, force, refresh, keep_others) {
             Ok(out) if progress::verbose() => print!("{out}"),
             Ok(out) => match out.lines().find(|l| l.starts_with("published bundle ") || l.starts_with("bundle ") && l.contains(" is up to date")) {
                 Some(line) => tracing::info!("{line}"),

@@ -97,7 +97,90 @@ fn checked(part: &BundlePart) -> Result<&BundlePart> {
     Ok(part)
 }
 
+/// What a build of some modules keeps of the current bundle: the parts of the modules it does not
+/// build, so that the build of one module (`--module`, a job of the operator mode) does not drop
+/// the others. A module writes under directories of its own at the top of the bundle (the geocoder
+/// `segments/`, tiles `tiles/`), so what is kept is every file outside those the build writes.
+pub struct Kept {
+    from: PathBuf,
+    modules: Vec<BundleModule>,
+    licenses: Vec<LicenseNotice>,
+    artifacts: Vec<Artifact>,
+}
+
+/// The first directory of a path inside the bundle.
+fn top(path: &str) -> &str {
+    path.split(['/', '\\']).next().unwrap_or(path)
+}
+
+/// What the current bundle has of the modules that `own` does not name; `None` when there is no
+/// current bundle or it has no other module. Licenses of a source that `own` licenses again are
+/// not kept twice.
+pub fn kept(bundles: &Path, own: &[BundleModule], parts: &[BundlePart], licenses: &[LicenseNotice]) -> Result<Option<Kept>> {
+    let Some(version) = current_version(bundles) else { return Ok(None) };
+    let from = bundles.join(&version);
+    let previous = BundleManifest::read(&from)?;
+    let modules: Vec<BundleModule> = previous.modules.into_iter().filter(|m| !own.iter().any(|o| o.name == m.name)).collect();
+    if modules.is_empty() {
+        return Ok(None);
+    }
+    let written: std::collections::BTreeSet<&str> = parts.iter().map(|p| top(&p.to)).collect();
+    let artifacts = previous.artifacts.into_iter().filter(|a| !written.contains(top(&a.path))).collect();
+    let licenses = previous.licenses.into_iter().filter(|l| !licenses.iter().any(|n| n.source == l.source)).collect();
+    Ok(Some(Kept { from, modules, licenses, artifacts }))
+}
+
+/// Holds the right to publish into a bundles directory: building two modules at once, each reading
+/// `current` to keep what the other published, would drop one of the two parts.
+pub(crate) struct PublishLock(PathBuf);
+
+const LOCK: &str = ".publish.lock";
+const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(300);
+
+impl PublishLock {
+    pub(crate) fn acquire(bundles: &Path) -> Result<Self> {
+        fs::create_dir_all(bundles)?;
+        let path = bundles.join(LOCK);
+        let started = std::time::Instant::now();
+        loop {
+            match fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(_) => return Ok(Self(path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if started.elapsed() > LOCK_WAIT {
+                        return Err(GekoError::Data(format!(
+                            "{} has been held for {} s by another build: if none is running, remove it",
+                            path.display(),
+                            LOCK_WAIT.as_secs()
+                        )));
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+    }
+}
+
+impl Drop for PublishLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// A new version made of `parts` alone.
+#[cfg(test)]
 pub fn publish(bundles: &Path, parts: &[BundlePart], modules: Vec<BundleModule>, licenses: Vec<LicenseNotice>, keep: usize) -> Result<BundleManifest> {
+    publish_with(bundles, parts, modules, licenses, keep, None)
+}
+
+fn publish_with(
+    bundles: &Path,
+    parts: &[BundlePart],
+    mut modules: Vec<BundleModule>,
+    mut licenses: Vec<LicenseNotice>,
+    keep: usize,
+    kept: Option<&Kept>,
+) -> Result<BundleManifest> {
     fs::create_dir_all(bundles)?;
     let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let version = version_name(now);
@@ -105,10 +188,28 @@ pub fn publish(bundles: &Path, parts: &[BundlePart], modules: Vec<BundleModule>,
     if staging.exists() {
         fs::remove_dir_all(&staging)?;
     }
+    if let Some(kept) = kept {
+        modules.extend(kept.modules.iter().cloned());
+        modules.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+        licenses.extend(kept.licenses.iter().cloned());
+    }
     let mut manifest = BundleManifest { format: FORMAT, version: version.clone(), created_unix: now, modules, licenses, artifacts: Vec::new() };
     for part in parts {
         let part = checked(part)?;
         link_tree(&part.from, &staging.join(&part.to), &staging, &mut manifest.artifacts)?;
+    }
+    for a in kept.map(|k| k.artifacts.as_slice()).unwrap_or_default() {
+        if a.path.split('/').any(|p| p.is_empty() || p == "..") {
+            return Err(GekoError::Data(format!("the current bundle lists an artifact at `{}`, outside it", a.path)));
+        }
+        let (from, to) = (kept.expect("there are artifacts to keep").from.join(&a.path), staging.join(&a.path));
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if fs::hard_link(&from, &to).is_err() {
+            fs::copy(&from, &to)?;
+        }
+        manifest.artifacts.push(a.clone());
     }
     manifest.write(&staging)?;
     let target = bundles.join(&version);
@@ -129,7 +230,8 @@ pub enum Published {
 
 /// Publishes a new version unless the current one was published from the same parts, modules and
 /// licenses, or `force`. A new version with the same content would only make every server reload
-/// for nothing.
+/// for nothing. With `keep_others`, the new version also has what the current one holds of the
+/// modules not in `modules` (see `Kept`).
 pub fn publish_incremental(
     bundles: &Path,
     parts: &[BundlePart],
@@ -137,14 +239,23 @@ pub fn publish_incremental(
     licenses: Vec<LicenseNotice>,
     keep: usize,
     force: bool,
+    keep_others: bool,
 ) -> Result<Published> {
     fn json(v: &impl serde::Serialize) -> Result<String> {
         serde_json::to_string(v).map_err(|e| GekoError::Other(e.into()))
     }
+    // Reading `current` to keep what it has and publishing the new one is one step: no other build
+    // may publish in between.
+    let _lock = PublishLock::acquire(bundles)?;
+    let kept = if keep_others { kept(bundles, &modules, parts, &licenses)? } else { None };
     let mut key = Key::new("publish").add("modules", &json(&modules)?).add("licenses", &json(&licenses)?);
     for part in parts {
         let part = checked(part)?;
         key = key.add(&part.to, &incremental::output_of(&part.from, &[])?);
+    }
+    if let Some(k) = &kept {
+        let shas: Vec<&str> = k.artifacts.iter().map(|a| a.sha256.as_str()).collect();
+        key = key.add("kept", &json(&(&k.modules, &k.licenses, shas))?);
     }
     let key = key.finish();
     if !force
@@ -159,7 +270,7 @@ pub fn publish_incremental(
         }
         return Ok(Published::UpToDate(stamp.output));
     }
-    let manifest = publish(bundles, parts, modules, licenses, keep)?;
+    let manifest = publish_with(bundles, parts, modules, licenses, keep, kept.as_ref())?;
     incremental::record(bundles, &Stamp { key, output: manifest.version.clone(), info: serde_json::Value::Null })?;
     Ok(Published::New(manifest))
 }
@@ -365,7 +476,7 @@ mod tests {
         let parts = parts(work.path());
         let publish = |modules: &[&str], force| {
             let modules = modules.iter().map(|m| module(m)).collect();
-            publish_incremental(&bundles, &parts, modules, vec![], 5, force).unwrap()
+            publish_incremental(&bundles, &parts, modules, vec![], 5, force, false).unwrap()
         };
 
         // Versions are named by the second: wait for a new name before a new publication.

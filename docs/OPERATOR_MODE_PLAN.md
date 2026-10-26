@@ -127,7 +127,7 @@ configMapGenerator:
 8. **Resuelve versiones**: la imagen de cada módulo, la más nueva de su contrato o la fijada con `version` (ver «Decidido», una imagen por módulo).
 9. **Lanza el build**: un `Job` por módulo (o por módulo y país) que descarga con el `Downloader`, genera su parte del bundle y la publica en el almacenamiento. El Job tiene sus propios `requests` y `limits`: el pico de memoria del build no toca a los pods que sirven. Tiles lanza Planetiler dentro de su Job.
 10. **Despliega los módulos**: un `Deployment` y un `Service` por módulo activo, en modo servicio, con `bundles_url` apuntando al almacenamiento.
-11. **Readiness**: cada pod responde 503 en `/health` hasta cargar su bundle, y Kubernetes no le manda tráfico hasta entonces.
+11. **Readiness**: cada pod responde 503 en `/ready` hasta cargar su bundle (con la parte de sus módulos), y Kubernetes no le manda tráfico hasta entonces. `/health` es la sonda de liveness y responde desde el arranque: así lo usa ya el `HEALTHCHECK` de la imagen, mientras `geko up` construye.
 12. **Rutas**: un `Ingress` o `HTTPRoute` que manda `/geocoder/*` al servicio del geocoder y `/tiles/*` al de tiles. Las rutas comunes las sirve cada módulo (ver «Decidido»).
 
 ### Servicio
@@ -202,7 +202,7 @@ Algunos equipos de plataforma no aceptan operadores de terceros con permisos par
 | Build en un Job; bundles por almacenamiento compartido o `bundles_url` | Build y servicio en el mismo proceso, en disco local |
 | Rutas en el Ingress | Rutas en axum, en el host |
 | `/v1/attribution` y `/docs` por módulo o agregados | Los sirve el host |
-| `/health` por módulo (sonda de readiness) | Un `/health` común |
+| `/health` (liveness) y `/ready` (readiness) por módulo | Los mismos, comunes |
 | RBAC, recursos por pod, orden build → despliegue | No aplica |
 
 Por eso:
@@ -252,9 +252,9 @@ Los comandos de desarrollo no se complican ni se duplican: leen `[deploy] mode` 
 
 1. ~~**Medir con España** lo que comparten tiles y el geocoder~~ Hecho (2026-10-26): los tamaños de los extractos frente a las entradas globales de tiles, y que `raw/` ya comparte el PBF, con condiciones (ver «Qué comparten los módulos»). El `--purge` del geocoder que borraba el `raw/` de tiles ya está corregido (rama `bugfix/purge-keeps-other-modules-raw` de `geko-geocoder`). **El tiempo de lectura de OSM con España se deja para el final** (paso 8): no cambia ninguna decisión, y hacerlo pide una ejecución con España de cada módulo (30 a 45 min, 20 a 40 GB de disco y unos 4-5 GB de RAM de pico, de una en una). Se medirá ya dentro del cluster local, para fijar los `requests` y `limits` de los Jobs de build en `[deploy.<módulo>]`.
 2. ~~**Decidir los puntos 1 y 2 de «Por decidir»**~~ Hecho (2026-10-26): una imagen por módulo, `DylibModule` se mantiene y las rutas comunes las sirve cada módulo (ver «Decidido»).
-3. **`[deploy] mode`** en `geko.toml`, con `single` por defecto y `operator` como error claro mientras no exista.
-4. **`single` sobre el camino de bundles del operador**, con `BundleStore`. Antes que el servicio por módulo: `geko serve --module` lee los bundles por ese camino.
-5. **Servicio por módulo**: `geko serve --module <módulo>` y `geko build --module <módulo>`, con su `/health` y sus rutas comunes (ver «Decidido»).
+3. ~~**`[deploy] mode`** en `geko.toml`~~ Hecho (2026-10-27): `single` por defecto; con `operator`, `geko serve|build|up` piden `--module` (un módulo por proceso) mientras el operador no exista. `[deploy.<módulo>]` lleva `replicas`, `cpu` y `memory`.
+4. ~~**`single` sobre el camino de bundles del operador**, con `BundleStore`~~ Hecho (2026-10-27): `Local` (el directorio de datos o un volumen compartido) y `Mirror` (`bundles_url`); el build publica por el store y el servidor le pide la versión nueva.
+5. ~~**Servicio por módulo**~~ Hecho (2026-10-27): `geko serve --module <módulo>` y `geko build --module <módulo>`. El build de un módulo conserva en el bundle las partes de los demás (un directorio de primer nivel por módulo, sin cambiar el SDK) y las publicaciones se serializan con un bloqueo (`.publish.lock`). `/ready` es la sonda de readiness; `/health` sigue respondiendo desde el arranque. Las rutas comunes (`/v1/attribution`, `/docs`, `/metrics`) las sirve el host para los módulos que monta, que con `--module` es solo el suyo; llevarlas a la SDK queda para cuando haga falta.
 6. **Procesos separados en local** (`docker-compose` de ejemplo) para desarrollar el host.
 7. **`deploy/` y los manifiestos**: la base de kustomize y los overlays `local`, `ci` y `prod`, o `geko k8s render` / un chart de Helm. Con comprobaciones sin cluster en cada PR (`kustomize build` con `kubeconform` y un diff contra los YAML versionados).
 8. **`make start-dev` y `make stop-dev` según `[deploy] mode`** (`single` como hoy; `operator` crea el cluster local y aplica el overlay `local`, ver «Los `make` de desarrollo siguen el modo»), y el job de CI con `kind` o `k3d` y Luxemburgo. Aquí se mide también el tiempo con España (paso 1).
