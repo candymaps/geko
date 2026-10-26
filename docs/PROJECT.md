@@ -7,7 +7,7 @@ geko es un motor geoespacial modular y multipaís. Este repositorio es **el host
 | Módulo | Repositorio | Estado |
 |---|---|---|
 | `geocoder` | [candymaps/geko-geocoder](https://github.com/candymaps/geko-geocoder) | Búsqueda, autocompletado e inversa, con los packs de país; su especificación, en su `docs/PROJECT.md` |
-| `tiles` | [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles) | Esqueleto: responde 503 |
+| `tiles` | [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles) | Teselas vectoriales del ámbito (Planetiler y el perfil de Protomaps), con sus estilos, fuentes y sprites; su plan, en su `docs/MODULE_PLAN.md` |
 
 Todo el ciclo es **automático**: se declaran en `geko.toml` el ámbito y los módulos, y geko baja los módulos, les pide que descarguen y generen lo suyo para el ámbito, publica el bundle y lo sirve (sección 7).
 
@@ -96,7 +96,7 @@ La configuración está siempre en `/etc/geko/geko.toml`, con la de cada módulo
 ```toml
 [modules]
 geocoder = true                 # o una tabla: { enabled, config, version, registry }
-tiles    = false
+tiles    = true
 
 [[scope]]
 country = "ES"
@@ -235,7 +235,7 @@ geko/
 
 1. **Host y módulos** (docs/MODULES_PLAN.md): pasos 1–6 *(hechos; quedan las semanas de uso real del paso 6)*; paso 7, los repositorios aparte *(hecho, 2026-10-22)*.
 2. **Operación:** `BundleStore` con S3 y enrutador entre nodos; regeneración programada con diffs *(del geocoder)*.
-3. **Más módulos:** teselas (`tiles`), enrutamiento.
+3. **Más módulos:** teselas (`tiles`) *(publicado, 2026-10-26)*; enrutamiento.
 
 ## 15. Stack
 
@@ -266,6 +266,7 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 
 - **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
+- **Teselas** (2026-10-26): `tiles` publicado (`0.1.0`), en `ci/modules` y activo por defecto, como el geocoder.
 - **Servicio:** página de demostración en `/`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
 ## 19. Comprobaciones

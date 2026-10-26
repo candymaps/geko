@@ -6,7 +6,7 @@
 
 [modules]
 geocoder = true
-tiles    = false
+tiles    = true
 
 [[scope]]
 country = "ES"          # ISO 3166-1; regions = ["ES-PM"] narrows a country to some regions

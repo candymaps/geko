@@ -203,8 +203,8 @@ const MOVED_TO_GEOCODER: &[(&str, Option<&str>)] = &[
 ];
 
 /// The modules active by default, without a `[modules]` entry: only those published for every
-/// geko, so that a geko.toml that names none of them starts. Tiles is not yet: `tiles = true`.
-const DEFAULT_MODULES: &[&str] = &["geocoder"];
+/// geko (ci/modules), so that a geko.toml that names none of them starts.
+const DEFAULT_MODULES: &[&str] = &["geocoder", "tiles"];
 
 impl Config {
     pub fn load(path: &Path) -> Result<Self> {
@@ -293,9 +293,9 @@ mod tests {
     }
 
     #[test]
-    fn defaults_enable_the_geocoder_alone() {
+    fn defaults_enable_both_modules() {
         let c = Config::parse("").unwrap();
-        assert_eq!(names(&c), ["geocoder"]);
+        assert_eq!(names(&c), ["geocoder", "tiles"]);
         assert_eq!(c.serve.listen.port(), 8080);
         assert!(!c.data.accept_licenses);
         assert_eq!(c.data.refresh, Refresh::IfChanged);

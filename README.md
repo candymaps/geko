@@ -21,7 +21,8 @@
 A modular, multi-country geospatial engine. Each service is a module, enabled in `geko.toml`, on top of the same data:
 
 - **Geocoding** (available, [geko-geocoder](https://github.com/candymaps/geko-geocoder)): turns addresses and place names into coordinates (search and autocomplete), and coordinates into addresses (reverse).
-- **Vector tiles** ([geko-tiles](https://github.com/candymaps/geko-tiles), a skeleton for now), **routing…** (planned): new modules that plug in without changing the others.
+- **Vector tiles** (available, [geko-tiles](https://github.com/candymaps/geko-tiles)): vector tiles of the scope, with the Protomaps styles, their fonts and sprites.
+- **Routing…** (planned): new modules that plug in without changing the others.
 
 They all share the same foundation:
 
@@ -40,7 +41,8 @@ All you need is Docker.
 
 ```toml
 [modules]
-geocoder = true          # geocoding; more modules (tiles, routing…) are on the way
+geocoder = true          # geocoding
+tiles    = true          # vector tiles; more modules (routing…) are on the way
 
 [[scope]]
 country = "ES"            # ISO 3166-1; one [[scope]] per country (LU…)
@@ -81,7 +83,7 @@ Every section and option of geko itself (the host), with its default value unles
 # built the bundle it serves, and downloads it if missing.
 [modules]
 geocoder = true
-tiles    = false                    # still a skeleton, not published: off unless set to true
+tiles    = true
 
 # [modules.geocoder]                # instead of `geocoder = true` above
 # version  = "1.4.2"                # default: the newest of the contract of this geko
