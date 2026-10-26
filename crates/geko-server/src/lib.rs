@@ -259,6 +259,11 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
     body
 }
 
+/// `/admin/api/modules`: the active modules, so the dashboard offers a tab for each.
+fn module_list(modules: &[Mounted]) -> serde_json::Value {
+    modules.iter().map(|m| json!({ "name": m.name(), "version": m.slot.version(), "unavailable": m.module.unavailable() })).collect()
+}
+
 /// `/docs`: Swagger UI over the reference of geko and those of the modules.
 fn docs(modules: &[Mounted]) -> String {
     let mut specs = vec![json!({ "url": "/openapi.yaml", "name": "geko" })];
@@ -360,6 +365,7 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
     let names: Vec<String> = modules.iter().map(|m| m.name().to_owned()).collect();
     let (attribution_bundles, attribution_modules) = (bundles.clone(), modules.to_vec());
     let docs = docs(modules);
+    let listed = modules.to_vec();
     let shared_routes = Router::new()
         .route(
             "/v1/attribution",
@@ -370,6 +376,13 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
         )
         .route("/openapi.yaml", get(|| async { ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
         .route("/docs", get(move || async move { axum::response::Html(docs) }))
+        .route(
+            "/admin/api/modules",
+            get(move || {
+                let body = module_list(&listed);
+                async move { Json(body) }
+            }),
+        )
         .route("/", get(|| async { axum::response::Html(DEMO) }));
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
@@ -562,6 +575,15 @@ mod tests {
         let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
         assert!(page.starts_with("<!doctype html>") && page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_lists_the_active_modules_behind_the_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        assert_eq!(get_json(&app, "/admin/api/modules").await.0, StatusCode::UNAUTHORIZED);
+        let (status, body) = get_json(&app, "/admin/api/modules?api_key=k").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!([{ "name": "fake", "version": "1.0.0", "unavailable": null }]));
     }
 
     #[tokio::test]
