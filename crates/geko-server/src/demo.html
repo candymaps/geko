@@ -38,10 +38,47 @@
 </div>
 <script>
 const map = L.map('map', { zoomControl: false }).setView([40.4, -3.7], 6);
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-}).addTo(map);
 const layer = L.layerGroup().addTo(map);
+
+// The base map: the tiles module's own, if it is active and answers, or else OpenStreetMap's.
+function osmBase() {
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+}
+const getJson = async url => {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+};
+const load = (tag, attrs) => new Promise((ok, fail) => {
+  const el = Object.assign(document.createElement(tag), attrs, { onload: ok, onerror: fail });
+  document.head.append(el);
+});
+// MapLibre needs absolute URLs for the tiles and the sprite (it asks for the tiles from a worker, where
+// `/tiles/…` does not resolve), and `new URL` would escape the `{z}` of a template: it is joined by hand.
+const absolute = url => /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : location.origin + url;
+async function tilesBase() {
+  const [catalog, tilejson] = await Promise.all([getJson('/tiles/styles.json'), getJson('/tiles/tilejson.json')]);
+  const flavor = catalog.flavors.includes('dark') && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  const lang = navigator.languages.flatMap(l => [l, l.split('-')[0]]).find(l => catalog.languages.includes(l)) || 'en';
+  const style = await getJson(catalog.style.replace('{flavor}', flavor).replace('{lang}', lang));
+  const { url, ...source } = style.sources.protomaps;
+  style.sources.protomaps = {
+    ...source, tiles: tilejson.tiles.map(absolute), minzoom: tilejson.minzoom, maxzoom: tilejson.maxzoom,
+    ...(tilejson.bounds ? { bounds: tilejson.bounds } : {}), attribution: tilejson.attribution,
+  };
+  style.glyphs = absolute(style.glyphs);
+  style.sprite = absolute(style.sprite);
+  await load('link', { rel: 'stylesheet', href: 'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css' });
+  await load('script', { src: 'https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js' });
+  await load('script', { src: 'https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/dist/leaflet-maplibre-gl.js' });
+  L.maplibreGL({ style }).addTo(map);
+  map.setMaxZoom(19);
+  // The tiles cover the scope, not the whole of Spain: start there, with the pin if it was not left elsewhere.
+  if (tilejson.center) map.setView([tilejson.center[1], tilejson.center[0]], tilejson.center[2]);
+  if (!pinSaved) pin.setLatLng(map.getCenter());
+}
 fetch('/v1/attribution').then(r => r.json()).then(a => {
   const credits = a.sources.map(s => s.attribution).join(' · ');
   map.attributionControl.addAttribution(`Results: ${credits} · <a href="/v1/attribution">licenses</a>`);
@@ -59,9 +96,13 @@ try {
 // The focus of searches: a pin that is dragged around the map. It starts where it was left, or
 // at the centre of the map.
 let start = map.getCenter();
+let pinSaved = false;
 try {
   const saved = JSON.parse(localStorage.getItem('geko.pin'));
-  if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) start = L.latLng(saved.lat, saved.lng);
+  if (saved && Number.isFinite(saved.lat) && Number.isFinite(saved.lng)) {
+    start = L.latLng(saved.lat, saved.lng);
+    pinSaved = true;
+  }
 } catch {}
 const pin = L.marker(start, { draggable: true, autoPan: true, zIndexOffset: 1000, title: 'Focus of the search: drag it' })
   .bindTooltip('Focus', { direction: 'top', offset: [-15, -28] });
@@ -141,15 +182,19 @@ text.addEventListener('keydown', async e => {
 });
 map.on('click', e => { if (geocoder) ask('reverse', { 'point.lat': e.latlng.lat, 'point.lon': e.latlng.lng }); });
 
-// The page of the host shows what the active modules offer: without the geocoder, only the map.
+// The page of the host shows what the active modules offer: without the geocoder, only the map, and
+// the map is that of the tiles module when it is active and usable (it has built its bundle).
 let geocoder = false;
 fetch('/health').then(r => r.json()).then(h => {
-  geocoder = (h.modules || []).includes('geocoder');
+  const modules = h.modules || [];
+  geocoder = modules.includes('geocoder');
   if (!geocoder) {
     document.getElementById('panel').hidden = true;
     pin.remove();
   }
-}).catch(() => {});
+  const tiles = modules.includes('tiles') && !(h.modules_unavailable || {}).tiles;
+  return tiles ? tilesBase().catch(osmBase) : osmBase();
+}).catch(osmBase);
 </script>
 </body>
 </html>
