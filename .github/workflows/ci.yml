@@ -92,6 +92,18 @@ jobs:
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
           ci/modules.sh check
+      # What merging the pull request changes of what the modules build against, for pr-comment.yml
+      # to warn of it, whether or not the checks ran: `contract` (CONTRACT of the SDK) and `sdk`
+      # (anything in its crate, the contract included).
+      - id: warnings
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          contract() { git show "$1:crates/geko-module-sdk/src/module.rs" | sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p'; }
+          warnings=
+          [ "$(contract HEAD^1)" = "$(contract HEAD)" ] || warnings="$warnings contract"
+          git diff --quiet HEAD^1 HEAD -- crates/geko-module-sdk || warnings="$warnings sdk"
+          echo "warnings=${warnings# }" >> "$GITHUB_OUTPUT"
+          echo "warnings: ${warnings:-none}"
       - if: always() && github.event_name == 'pull_request'
         run: |
           result=failure
@@ -101,8 +113,8 @@ jobs:
             [ "${{ steps.release.outputs.checked }}" = 1 ] && result=checked-on-dev
           fi
           echo "checks: $result"
-          printf '{"number": %s, "head": "%s", "result": "%s"}\n' \
-            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" > pr.json
+          printf '{"number": %s, "head": "%s", "result": "%s", "warnings": "%s"}\n' \
+            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" "${{ steps.warnings.outputs.warnings }}" > pr.json
       - if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
