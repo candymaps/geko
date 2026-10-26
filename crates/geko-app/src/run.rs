@@ -14,7 +14,8 @@ use geko_module_sdk::stages::StageLog;
 use geko_module_sdk::{GekoError, Result};
 use serde::Serialize;
 
-use crate::bundle::{self, Published};
+use crate::bundle::Published;
+use crate::bundle_store;
 use crate::config::Config;
 use crate::progress;
 
@@ -74,8 +75,9 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
         return Ok(out);
     }
     let mut log = StageLog::new();
-    let bundles = config.bundles_dir();
-    let published = bundle::publish_incremental(&bundles, &parts, entries, licenses, config.build.keep, force)?;
+    let store = bundle_store::open(config);
+    let bundles = store.dir().to_owned();
+    let published = store.publish(&parts, entries, licenses, force)?;
     let manifest = match &published {
         Published::New(manifest) => {
             writeln!(

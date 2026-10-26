@@ -2,6 +2,7 @@
 //! in, and a module may run it with itself linked in, for its own checks (the golden, valgrind).
 
 mod bundle;
+mod bundle_store;
 mod config;
 mod dylib;
 mod modules;
@@ -115,22 +116,22 @@ fn serve(config: &Config, opener: &Arc<Opener>, opened: &[Opened], listen: Optio
         let Some((_, origin)) = origins.iter().find(|(n, _)| n == name) else { return Ok(None) };
         reopener.reopen(name, version, origin)
     });
-    let pull = (!config.serve.bundles_url.is_empty()).then(|| {
-        let (url, dir, keep) = (config.serve.bundles_url.clone(), config.bundles_dir(), config.build.keep);
-        // Bundles are not sources: a serving machine pulls them even when it never downloads data.
-        let downloader = geko_fetch::HttpDownloader::new(geko_fetch::HttpDownloaderConfig::default());
-        let pull: geko_server::Pull = Arc::new(move || {
-            if let Some(version) = bundle::pull(&url, &dir, &downloader, keep)? {
-                tracing::info!(%version, %url, "bundle pulled");
+    // Before each look for a new version the server asks its store to bring it: nothing for a
+    // directory (the build writes where the server reads), a pull for a mirror.
+    let store = bundle_store::open(config);
+    let pull: geko_server::Pull = {
+        let store = Arc::clone(&store);
+        Arc::new(move || {
+            if let Some(version) = store.sync()? {
+                tracing::info!(%version, from = %store.describe(), "bundle pulled");
             }
             Ok(())
-        });
-        pull
-    });
+        })
+    };
     let bundles = geko_server::BundleSource {
-        dir: config.bundles_dir(),
+        dir: store.dir().to_owned(),
         reload: std::time::Duration::from_secs(config.serve.reload_secs.max(1)),
-        pull,
+        pull: Some(pull),
         reopen: Some(reopen),
     };
     let addr = listen.unwrap_or(config.serve.listen);
