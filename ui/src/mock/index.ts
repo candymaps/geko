@@ -62,6 +62,11 @@ const stats = (): Stats => ({
     requests: Array.from({ length: 60 }, (_, i) => Math.round(900 + Math.sin(i / 5) * 260 + Math.random() * 120)),
     p99_ms: Array.from({ length: 60 }, (_, i) => 5 + Math.round((Math.sin(i / 4) + 1) * 2.5)),
   },
+  last_minute: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(15 + Math.sin(i / 6) * 5 + Math.random() * 4)),
+    p99_ms: Array.from({ length: 60 }, (_, i) => 5 + Math.round((Math.sin(i / 7) + 1) * 2.5)),
+  },
 });
 
 const tileStatus = (): TileStatus => ({
@@ -136,6 +141,11 @@ const tileStats = (): TileStats => ({
     end_unix: now(),
     requests: Array.from({ length: 60 }, (_, i) => Math.round(36_000 + Math.sin(i / 5) * 9_000 + Math.random() * 4_000)),
     p99_us: Array.from({ length: 60 }, (_, i) => (i % 17 === 0 ? 50 : 25)),
+  },
+  last_minute: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(600 + Math.sin(i / 6) * 150 + Math.random() * 70)),
+    p99_us: Array.from({ length: 60 }, (_, i) => (i % 23 === 0 ? 50 : 25)),
   },
 });
 

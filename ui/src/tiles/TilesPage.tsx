@@ -1,5 +1,5 @@
 import { Activity, Database, Layers, Palette, Settings2 } from "lucide-preact";
-import { useState } from "preact/hooks";
+import { useTab } from "../hooks";
 import { useApi } from "../api";
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { mock } from "./mock";
@@ -127,7 +127,7 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { data: stats, error } = useApi<Stats>("/tiles/stats.json", 10_000);
+  const { data: stats, error } = useApi<Stats>("/tiles/stats.json", 1_000);
   if (!stats) return <Placeholder error={error} module="tiles" />;
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
   const served = stats.zooms.reduce((t, z) => t + z.tiles, 0);
@@ -138,11 +138,11 @@ function Performance() {
   const share = (n: number) => (requests === 0 ? 0 : Math.round((n / requests) * 1000) / 10);
   return (
     <div class="gc-grid">
-      <Card title="Requests per second" aside="Last 60 minutes">
-        <Spark data={stats.last_hour.requests.map((n) => n / 60)} unit="req/s" />
+      <Card title="Requests per second" aside="Last 60 seconds">
+        <Spark data={stats.last_minute.requests} unit="req/s" />
       </Card>
-      <Card title="p99 time in the module (µs)" aside="Last 60 minutes">
-        <Spark data={stats.last_hour.p99_us.map((v) => v ?? 0)} unit="µs" />
+      <Card title="p99 time in the module (µs)" aside="Last 60 seconds">
+        <Spark data={stats.last_minute.p99_us.map((v) => v ?? 0)} unit="µs" />
       </Card>
       <Card title="Served" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
@@ -287,7 +287,7 @@ function settingsOf(status: Status): Setting[] {
 }
 
 export function TilesPage({ version }: { version?: string }) {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useTab("geko.tab.tiles", TABS.map((t) => t.id));
   const { data: status, error } = useApi<Status>("/tiles/status.json", 30_000);
   const needsStatus = tab !== "performance";
   return (

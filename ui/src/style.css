@@ -243,8 +243,13 @@ body {
   align-items: center;
   gap: 12px;
   height: 60px;
-  padding: 0 20px 0 16px;
+  padding: 0 20px 0 0;
   background: var(--bg);
+}
+@media (max-width: 767px) {
+  .topbar {
+    padding-left: 16px;
+  }
 }
 .topbar .menu {
   display: grid;
@@ -613,6 +618,51 @@ main {
 }
 .gc-spark .area {
   fill: var(--soft);
+}
+.gc-spark-wrap {
+  position: relative;
+  cursor: crosshair;
+}
+.gc-spark-wrap .guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+.gc-spark-wrap .dot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--primary-ink);
+  box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none;
+}
+.gc-spark-wrap .tip {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 1px;
+  padding: 4px 8px;
+  margin-left: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  box-shadow: 0 4px 10px -4px var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.gc-spark-wrap .tip.left {
+  margin-left: 0;
+  transform: translateX(calc(-100% - 10px));
+}
+.gc-spark-wrap .tip small {
+  color: var(--muted);
 }
 .gc-bars {
   display: grid;

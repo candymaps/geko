@@ -36,4 +36,5 @@ export interface Stats {
   zooms: { zoom: number; tiles: number; empty: number; bytes: number }[];
   styles: { style: string; requests: number }[];
   last_hour: { end_unix: number; requests: number[]; p99_us: (number | null)[] };
+  last_minute: { end_unix: number; requests: number[]; p99_us: (number | null)[] };
 }

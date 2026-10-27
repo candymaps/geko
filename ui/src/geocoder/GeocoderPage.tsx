@@ -2,7 +2,7 @@ import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { useApi } from "../api";
 import type { Stats, Status } from "./api";
-import { useState } from "preact/hooks";
+import { useTab } from "../hooks";
 import { mock } from "./mock";
 
 const TABS: Tab[] = [
@@ -156,7 +156,7 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { data: stats, error } = useApi<Stats>("/geocoder/v1/stats", 10_000);
+  const { data: stats, error } = useApi<Stats>("/geocoder/v1/stats", 1_000);
   const p = mock.performance;
   if (!stats) return <Placeholder error={error} module="geocoder" />;
   const lookups = stats.cache.hits + stats.cache.misses;
@@ -164,11 +164,11 @@ function Performance() {
   const total = stats.routes.reduce((t, r) => t + r.requests, 0);
   return (
     <div class="gc-grid">
-      <Card title="Requests per second" aside="Last 60 minutes">
-        <Spark data={stats.last_hour.requests.map((n) => n / 60)} unit="req/s" />
+      <Card title="Requests per second" aside="Last 60 seconds">
+        <Spark data={stats.last_minute.requests} unit="req/s" />
       </Card>
-      <Card title="p99 latency (ms)" aside="Last 60 minutes">
-        <Spark data={stats.last_hour.p99_ms.map((v) => v ?? 0)} unit="ms" />
+      <Card title="p99 latency (ms)" aside="Last 60 seconds">
+        <Spark data={stats.last_minute.p99_ms.map((v) => v ?? 0)} unit="ms" />
       </Card>
       <Card title="Health of the answers" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
@@ -335,7 +335,7 @@ function settingsOf(status: Status): Setting[] {
 }
 
 export function GeocoderPage({ version }: { version?: string }) {
-  const [tab, setTab] = useState("overview");
+  const [tab, setTab] = useTab("geko.tab.geocoder", TABS.map((t) => t.id));
   const { data: status, error } = useApi<Status>("/geocoder/v1/status", 30_000);
   const needsStatus = tab !== "performance" && tab !== "debugger";
   return (

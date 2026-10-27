@@ -25,4 +25,5 @@ export interface Stats {
   merged_duplicates: number;
   cache: { enabled: boolean; hits: number; misses: number };
   last_hour: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
+  last_minute: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
 }

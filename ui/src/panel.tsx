@@ -27,16 +27,42 @@ export function Stat({ label, value, hint }: { label: string; value: string; hin
   );
 }
 
+const reading = (v: number) => v.toLocaleString("en", { maximumFractionDigits: v < 10 ? 2 : v < 100 ? 1 : 0 });
+
+/** One value per second, the last one being the current second. */
 export function Spark({ data, unit }: { data: number[]; unit: string }) {
-  const max = Math.max(...data) * 1.1;
+  const [hover, setHover] = useState<number | null>(null);
+  const peak = Math.max(...data);
+  const max = peak * 1.1 || 1;
   const w = 300;
   const h = 64;
-  const points = data.map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`);
+  const last = data.length - 1;
+  const points = data.map((v, i) => `${((i / last) * w).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`);
+  const at = (e: PointerEvent) => {
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setHover(Math.max(0, Math.min(last, Math.round(((e.clientX - box.left) / box.width) * last))));
+  };
+  const x = hover === null ? 0 : (hover / last) * 100;
+  const ago = hover === null ? 0 : last - hover;
   return (
-    <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last hour, peak ${Math.max(...data).toFixed(1)} ${unit}`}>
-      <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} class="area" />
-      <polyline points={points.join(" ")} class="line" />
-    </svg>
+    <div class="gc-spark-wrap" onPointerMove={at} onPointerLeave={() => setHover(null)}>
+      <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last 60 seconds, peak ${peak.toFixed(1)} ${unit}`}>
+        <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} class="area" />
+        <polyline points={points.join(" ")} class="line" />
+      </svg>
+      {hover !== null && (
+        <>
+          <span class="guide" style={{ left: `${x}%` }} />
+          <span class="dot" style={{ left: `${x}%`, top: `${(1 - data[hover] / max) * 100}%` }} />
+          <span class={`tip${x > 60 ? " left" : ""}`} style={{ left: `${x}%` }}>
+            <strong>
+              {reading(data[hover])} {unit}
+            </strong>
+            <small>{ago === 0 ? "This second" : `${ago} s ago`}</small>
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 

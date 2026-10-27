@@ -23,6 +23,26 @@ export function useRoute(): [string, (route: string) => void] {
   return [route, (next) => (location.hash = `/${next}`)];
 }
 
+/** The selected tab of a view, kept so that it is still there when coming back to the view. */
+export function useTab(key: string, ids: string[]): [string, (id: string) => void] {
+  const [tab, setTab] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      if (saved && ids.includes(saved)) return saved;
+    } catch {}
+    return ids[0];
+  });
+  return [
+    tab,
+    (id) => {
+      setTab(id);
+      try {
+        localStorage.setItem(key, id);
+      } catch {}
+    },
+  ];
+}
+
 export function useStored(key: string, initial: boolean): [boolean, (value: boolean) => void] {
   const [value, setValue] = useState(() => {
     try {
