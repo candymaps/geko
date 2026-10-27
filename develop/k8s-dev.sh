@@ -120,7 +120,9 @@ up() {
         build "$module"
     done
     for module in ${MODULES//,/ } gateway; do
-        kubectl -n "$NAMESPACE" rollout status "deployment/geko-$module" --timeout=600s
+        # Not `rollout status`: a module pod is not ready until its build has published, which can take
+        # longer than the progress deadline of its deployment, and that one would fail for it.
+        kubectl -n "$NAMESPACE" wait --for=condition=Available "deployment/geko-$module" --timeout=600s
     done
     stop_forward
     # The servers are ready when they have loaded what the builds published: every 30 s they look.

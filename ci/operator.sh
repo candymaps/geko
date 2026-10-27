@@ -34,6 +34,19 @@ within() {
     done
 }
 
+# `make start-dev` leaves a port-forward behind, but a CI runner kills what a step left running when
+# the step ends: open our own when nothing answers on the port.
+if [ "$(code /)" = 000 ]; then
+    k port-forward svc/geko-gateway "${BASE##*:}:80" > /dev/null &
+    forward=$!
+    trap 'kill "$forward" 2> /dev/null || true' EXIT
+    for _ in $(seq 1 30); do
+        [ "$(code /)" != 000 ] && break
+        sleep 1
+    done
+    [ "$(code /)" != 000 ] || fail "the gateway does not answer on $BASE"
+fi
+
 echo "==> each module answers through the gateway"
 expect "the geocoder searches" "$SEARCH" 200
 expect "tiles serves its tilejson" /tiles/tilejson.json 200
