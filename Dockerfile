@@ -34,6 +34,9 @@ COPY --from=build /out/geko /geko
 # empty without them.
 FROM scratch AS geocoder
 FROM scratch AS tiles
+# The Planetiler profile of the tiles module (protomaps-basemap.jar and styles/, from its ci/profile.sh),
+# given as the build context tiles-profile by `make start-dev`; empty without it.
+FROM scratch AS tiles-profile
 
 # geko and the modules of MODULES (comma-separated), each as the library that geko loads, as
 # GEKO_MODULES reads them. GEKO_MODULE_VERSION is the version they say they are, which goes into
@@ -53,6 +56,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=geko-target-local,target=/src/target \
     --mount=type=bind,from=geocoder,target=/modules/geocoder \
     --mount=type=bind,from=tiles,target=/modules/tiles \
+    --mount=type=bind,from=tiles-profile,target=/profile/tiles \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
     cargo build --profile $PROFILE --locked -p geko-app --bin geko; \
@@ -63,7 +67,12 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
       sed -i 's|^\(geko-[a-z-]*\) = { git = "https://github.com/candymaps/geko\(\.git\)\{0,1\}"[^}]*}|\1 = { path = "/src/crates/\1" }|' Cargo.toml; \
       package=$(find . -name module.toml -not -path './target/*' | head -1); \
       entry=$(sed -n 's/^entry *= *"\(.*\)"/\1/p' "$package"); \
-      cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
+      profile=; \
+      if [ "$m" = tiles ]; then \
+        [ -f /profile/tiles/protomaps-basemap.jar ] || { echo "module tiles: no Planetiler profile in the build context tiles-profile (make start-dev builds it with ci/profile.sh of its repository)" >&2; exit 1; }; \
+        profile=/profile/tiles/protomaps-basemap.jar; \
+      fi; \
+      env ${profile:+GEKO_TILES_PROFILE=$profile} cargo build --profile $PROFILE -p geko-module-$m-dylib --target-dir /src/target/modules; \
       mkdir /out/modules/$m; cp "/src/target/modules/$PROFILE/$entry" "$package" /out/modules/$m/; \
       cd /src; \
     done
@@ -73,8 +82,9 @@ FROM debian:bookworm-slim AS base
 LABEL org.opencontainers.image.source=https://github.com/candymaps/geko
 LABEL org.opencontainers.image.description="geko: geocoder with OSM and official national sources"
 # ca-certificates for the mirrors and buckets that are not reached through the certificates
-# compiled into the binary; curl for the health check.
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+# compiled into the binary; curl for the health check; libfontconfig1 because the Java runtime that
+# the tiles module downloads to run Planetiler reads the fonts of the profile with it.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl libfontconfig1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --home /var/lib/geko geko && mkdir -p /var/lib/geko /etc/geko && chown geko /var/lib/geko
 USER geko
@@ -91,6 +101,11 @@ FROM base AS local
 COPY --from=build-local /out/geko /usr/local/bin/geko
 COPY --from=build-local /out/modules /usr/lib/geko/modules
 ENV GEKO_MODULES=/usr/lib/geko/modules
+# The country packs of the geocoder, from its repository (the build context geocoder): never
+# downloaded, as with GEKO_PACKS in develop/compose.yaml, which mounts them over this folder. A pod
+# of the local cluster (deploy/overlays/local) has no repository to mount them from.
+COPY --from=geocoder /countries /packs
+ENV GEKO_PACKS=/packs
 ARG VERSION=unknown
 ARG REVISION=unknown
 LABEL org.opencontainers.image.version=$VERSION

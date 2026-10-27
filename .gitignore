@@ -8,3 +8,4 @@
 *.pmtiles
 .DS_Store
 /.geko-golden/
+/deploy/overlays/.dev/

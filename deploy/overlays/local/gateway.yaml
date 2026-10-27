@@ -1,0 +1,61 @@
+# The local stand-in of the Ingress controller (see gateway.conf). Its config is the config map
+# `gateway`, which the kustomization generates.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: geko-gateway
+  labels:
+    app.kubernetes.io/name: geko
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: geko
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: geko
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: geko
+        app.kubernetes.io/component: gateway
+        app.kubernetes.io/part-of: geko
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - name: http
+              containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+          volumeMounts:
+            - name: conf
+              mountPath: /etc/nginx/conf.d
+      volumes:
+        - name: conf
+          configMap:
+            name: gateway
+            items:
+              - key: gateway.conf
+                path: default.conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: geko-gateway
+  labels:
+    app.kubernetes.io/name: geko
+    app.kubernetes.io/component: gateway
+    app.kubernetes.io/part-of: geko
+spec:
+  selector:
+    app.kubernetes.io/name: geko
+    app.kubernetes.io/component: gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

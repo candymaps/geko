@@ -1,0 +1,25 @@
+# The configuration that deploy/base/resources.yaml is rendered from (`ci/deploy.sh render`, that is
+# `geko k8s render`): the modules that run, [deploy] with the replicas and resources of each, and
+# [data] max_age_days, which sets how often the build of each module runs. The scope, the sources
+# and the rest are those of the overlay (its geko.toml, which the config map `geko` carries).
+# Edit this and render again: resources.yaml is never edited.
+
+[modules]
+geocoder = true
+tiles    = true
+
+[deploy]
+mode = "operator"
+
+# Replicas and resources of the pods that serve, and of the job that builds. The overlays change
+# them for their cluster (see overlays/prod); these are the least that runs.
+# [deploy.geocoder]
+# replicas     = 2
+# cpu          = "500m"
+# memory       = "4Gi"
+# build_memory = "6Gi"
+[deploy.geocoder]
+replicas = 1
+
+[deploy.tiles]
+replicas = 1

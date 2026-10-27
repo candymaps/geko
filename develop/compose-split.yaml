@@ -1,0 +1,85 @@
+# The operator mode without Kubernetes (docs/OPERATOR_MODE_PLAN.md, step 6): one process per module,
+# as the pods of the cluster would be. The image is that of compose.yaml (geko and the modules of
+# GEKO_DEV_MODULES, built from this tree); what changes is how it runs:
+#
+#   build-geocoder, build-tiles   geko build --module <module>, one after the other (they share the
+#                                 downloads in raw/), each publishing a bundle that keeps the part of
+#                                 the other: the jobs of the operator mode
+#   geocoder, tiles               geko serve --module <module>: a server of one module, which loads
+#                                 the bundles of the shared volume as they appear, and answers
+#                                 /ready only once it has its part
+#   ingress                       nginx sending /tiles/ to tiles and the rest to geocoder: the Ingress
+#
+# Use it through the variables of `make start-dev` (the port, the configuration, the folder of the
+# modules, the profile of tiles), or by hand from the root of the repository:
+#
+#   GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build
+#
+#   GEKO_SPLIT_DATA   the volume with the bundles and the downloads (default: geko-split_data, which
+#                     starts empty; geko-dev_data, that of compose.yaml, reuses its downloads)
+name: geko-split
+
+x-geko: &geko
+  build:
+    context: ..
+    target: local
+    additional_contexts:
+      geocoder: ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder
+      tiles: ${GEKO_DEV_MODULES_DIR:-../..}/geko-tiles
+      tiles-profile: ${GEKO_DEV_TILES_PROFILE:-.}
+    args:
+      MODULES: ${GEKO_DEV_MODULES:-geocoder,tiles}
+      GEKO_MODULE_VERSION: ${GEKO_DEV_VERSION:-}
+  image: geko:dev
+  volumes:
+    - data:/var/lib/geko
+    - ${GEKO_DEV_CONFIG:-./geko.toml}:/etc/geko/geko.toml:ro
+    - ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder/countries:/packs:ro
+  environment:
+    GEKO_PACKS: /packs
+
+x-server: &server
+  <<: *geko
+  restart: unless-stopped
+  healthcheck:
+    # Ready, not only alive: the Ingress sends nothing to it until it has loaded its part.
+    test: ["CMD", "curl", "-fs", "http://127.0.0.1:8080/ready"]
+    interval: 5s
+    timeout: 3s
+    retries: 120
+
+services:
+  build-geocoder:
+    <<: *geko
+    command: ["build", "--module", "geocoder"]
+    restart: "no"
+
+  build-tiles:
+    <<: *geko
+    command: ["build", "--module", "tiles"]
+    restart: "no"
+    depends_on:
+      build-geocoder:
+        condition: service_completed_successfully
+
+  geocoder:
+    <<: *server
+    command: ["serve", "--module", "geocoder", "--listen", "0.0.0.0:8080"]
+
+  tiles:
+    <<: *server
+    command: ["serve", "--module", "tiles", "--listen", "0.0.0.0:8080"]
+
+  ingress:
+    image: nginx:1.27-alpine
+    ports:
+      - "${GEKO_DEV_PORT:-8080}:80"
+    volumes:
+      - ./split/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - geocoder
+      - tiles
+
+volumes:
+  data:
+    name: ${GEKO_SPLIT_DATA:-geko-split_data}

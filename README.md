@@ -113,7 +113,27 @@ rate_limit_per_s       = 0          # requests per second from one client addres
 rate_limit_burst       = 0          # burst above that rate (0: twice the rate)
 bundles_url            = ""         # HTTP address of bundles published on another machine; each reload pulls only what changed
 attribution_contact    = ""         # where to ask for the code of the derivative database (ODbL 4.6), in /v1/attribution
+
+# How geko is deployed (docs/OPERATOR_MODE_PLAN.md). The modules never read it.
+[deploy]
+mode = "single"                     # single: every module in one process, wherever it runs | operator: one deployment per module in Kubernetes
+                                    # (not implemented yet: with it, `geko serve|build|up` ask for `--module <name>`, one module per process)
+
+# [deploy.geocoder]                 # only the operator mode reads these
+# replicas = 2                      # default 1
+# cpu      = "500m"                 # Kubernetes quantities, as the pods ask for them
+# memory   = "4Gi"
 ```
+
+### One module per process
+
+`geko serve --module geocoder` (`--module` is an alias of `--modules`) serves only the routes of that module, and `geko build --module geocoder` builds only its part. The bundle that build publishes keeps what the current one has of the other modules, so each module can build in a job of its own, with its own resources; publications into the same bundles directory wait for each other (`.publish.lock`). A build with no `--module` publishes exactly the modules that are active, as before.
+
+Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
+
+To develop it as it runs in Kubernetes, put `[deploy] mode = "operator"` in the configuration of `make start-dev` (`develop/geko.toml`, or `DEV_CONFIG=…`): the same command then makes a local kind cluster (`geko-dev`) if there is none, loads the image into it, applies the manifests that `geko k8s render` writes from that configuration (a pod per module, a build job per module, one volume for the data, `deploy/`), builds each module one after the other, and serves it all at the same `http://localhost:8080/`. `make stop-dev` deletes what runs and keeps the cluster and its volume; `make stop-dev PURGE=1` deletes the cluster. It needs `docker`, `kind` and `kubectl`, and says so if one is missing. The `operator` workflow runs this on Luxembourg, and `ci/operator.sh` checks that a module that falls does not take the other with it and that each scales on its own.
+
+Without a cluster, `develop/compose-split.yaml` runs it as the cluster would: a build job per module, one after the other, a server per module and an nginx that sends each path to its module (`GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build`, with the same variables as `make start-dev`).
 
 ## License
 

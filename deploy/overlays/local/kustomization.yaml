@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: geko
+resources:
+  - ../../base
+  - namespace.yaml
+  - gateway.yaml
+configMapGenerator:
+  - name: geko
+    files:
+      - geko.toml
+  - name: gateway
+    files:
+      - gateway.conf
+# The image of `make start-dev` (geko with both modules, loaded into the cluster) serves for each.
+images:
+  - name: ghcr.io/candymaps/geko-geocoder
+    newName: geko
+    newTag: dev
+  - name: ghcr.io/candymaps/geko-tiles
+    newName: geko
+    newTag: dev
+patches:
+  # kind and k3d provision ReadWriteOnce volumes only, and every pod runs on their one node: what a
+  # cluster with ReadWriteMany storage (the base) does not need to be told.
+  - target:
+      kind: PersistentVolumeClaim
+      name: geko-data
+    patch: |-
+      - op: replace
+        path: /spec/accessModes/0
+        value: ReadWriteOnce
