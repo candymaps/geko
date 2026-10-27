@@ -3,6 +3,8 @@ kind: Kustomization
 # The local cluster, with the scope of the check.
 resources:
   - ../local
+generatorOptions:
+  disableNameSuffixHash: true
 configMapGenerator:
   - name: geko
     behavior: replace

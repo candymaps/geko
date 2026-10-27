@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# The manifests of the operator mode in deploy/ (docs/OPERATOR_MODE_PLAN.md, step 7), without a
-# cluster. deploy/base/resources.yaml is not edited: `geko k8s render` writes it from deploy/geko.toml.
+# The manifests of the operator mode in deploy/ (docs/OPERATOR_MODE_PLAN.md), without a cluster.
+# They are not edited: `geko k8s render` writes deploy/base/resources.yaml from deploy/geko.toml (what
+# the operator makes, for a cluster without it) and `geko k8s install` writes
+# deploy/operator/resources.yaml (the operator itself).
 #
-#   ci/deploy.sh render   writes deploy/base/resources.yaml again
-#   ci/deploy.sh check    fails if resources.yaml is not what geko k8s render writes now (a change of
-#                         the code or of deploy/geko.toml without rendering), if an overlay does not
-#                         build with kustomize, or if what it builds does not pass kubeconform
+#   ci/deploy.sh render   writes both again
+#   ci/deploy.sh check    fails if one is not what geko writes now (a change of the code or of
+#                         deploy/geko.toml without rendering), if an overlay does not build with
+#                         kustomize, or if what it builds does not pass kubeconform
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -14,11 +16,12 @@ KUBECONFORM_VERSION=0.6.7
 KUBECONFORM_SHA256=95f14e87aa28c09d5941f11bd024c1d02fdc0303ccaa23f61cef67bc92619d73
 KUBERNETES_VERSION=1.31.0
 RESOURCES=deploy/base/resources.yaml
+INSTALL=deploy/operator/resources.yaml
 
-# What geko k8s render writes for deploy/geko.toml, in the file `$1`. Without logs: the manifests go
+# What `geko k8s $1` writes for deploy/geko.toml, in the file `$2`. Without logs: the manifests go
 # to the standard output.
 render_to() {
-    RUST_LOG=off GEKO_CONFIG=deploy/geko.toml cargo run --locked -q -p geko-app --bin geko -- k8s render > "$1"
+    RUST_LOG=off GEKO_CONFIG=deploy/geko.toml cargo run --locked -q -p geko-app --bin geko -- k8s "$1" > "$2"
 }
 
 conform() {
@@ -47,11 +50,16 @@ check() {
     local status=0 fresh
     fresh=$(mktemp)
     trap "rm -f $fresh" EXIT
-    render_to "$fresh"
-    if ! diff -u "$RESOURCES" "$fresh"; then
-        echo "$RESOURCES is not what \`geko k8s render\` writes: run ci/deploy.sh render and commit it" >&2
-        status=1
-    fi
+    local command file
+    for command in render install; do
+        file=$RESOURCES
+        [ "$command" = render ] || file=$INSTALL
+        render_to "$command" "$fresh"
+        if ! diff -u "$file" "$fresh"; then
+            echo "$file is not what \`geko k8s $command\` writes: run ci/deploy.sh render and commit it" >&2
+            status=1
+        fi
+    done
     local overlay
     for overlay in deploy/overlays/*/; do
         echo "==> $overlay"
@@ -61,7 +69,7 @@ check() {
 }
 
 case ${1:-} in
-    render) render_to "$RESOURCES"; echo "wrote $RESOURCES" ;;
+    render) render_to render "$RESOURCES"; echo "wrote $RESOURCES"; render_to install "$INSTALL"; echo "wrote $INSTALL" ;;
     check) check ;;
     *) echo "usage: $0 render|check" >&2; exit 2 ;;
 esac
