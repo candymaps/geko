@@ -50,10 +50,12 @@ architecture() {
     local failed=0
     only "geko-module-sdk depends on" "hex serde serde_json sha2 thiserror tracing" "$(direct_dependencies geko-module-sdk)" || failed=1
     only "geko-server depends on" "arc-swap axum geko-module-sdk serde serde_json tokio tower-http tracing" "$(direct_dependencies geko-server)" || failed=1
-    only "geko-app depends on" "anyhow clap geko-artifact geko-fetch geko-module-sdk geko-server hex libloading mimalloc serde serde_json sha2 tokio toml tracing tracing-subscriber" "$(direct_dependencies geko-app)" || failed=1
+    only "geko-kube depends on" "anyhow futures k8s-openapi kube serde_json" "$(direct_dependencies geko-kube)" || failed=1
+    only "geko-app depends on" "anyhow clap geko-artifact geko-fetch geko-kube geko-module-sdk geko-server hex libloading mimalloc serde serde_json sha2 tokio toml tracing tracing-subscriber" "$(direct_dependencies geko-app)" || failed=1
     only "ureq is used by" "geko-fetch" "$(direct_dependents ureq)" || failed=1
     only "tokio is used by" "geko-server geko-app" "$(direct_dependents tokio)" || failed=1
     only "axum is used by" "geko-server" "$(direct_dependents axum)" || failed=1
+    only "kube is used by" "geko-kube" "$(direct_dependents kube)" || failed=1
     only "tower-http is used by" "geko-server" "$(direct_dependents tower-http)" || failed=1
     return $failed
 }

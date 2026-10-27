@@ -1,9 +1,11 @@
 //! What geko serves for every module (docs/MODULES_PLAN.md): `/health`, `/metrics`,
 //! `/v1/attribution`, `/openapi.yaml` and `/docs`, API keys, CORS and the rate limit, the bundle
 //! that every module loads and keeps watching, and the routes of each active module, mounted under
-//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio.
+//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio; the operator mode
+//! also serves the dashboard alone (`serve_dashboard`).
 
 mod access;
+mod dashboard;
 mod metrics;
 mod ui;
 
@@ -26,6 +28,7 @@ use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Mod
 use serde_json::json;
 
 pub use access::Access;
+pub use dashboard::{ModuleStatus, Statuses, serve as serve_dashboard};
 
 /// The module behind a mount, which a bundle built by another version of it switches to that
 /// version (`Reopen`); requests in flight finish on the one they started on.
