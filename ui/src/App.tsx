@@ -3,6 +3,7 @@ import type { ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { listModules, type ModuleInfo } from "./api";
 import { GeocoderPage } from "./geocoder/GeocoderPage";
+import { TilesPage } from "./tiles/TilesPage";
 import { useMedia, useRoute, useStored } from "./hooks";
 import { capitalize, iconOf, Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
@@ -66,7 +67,6 @@ export function App() {
       <div class="column">
         <Topbar
           title={onMap ? "Map" : capitalize(current)}
-          version={current === "geocoder" ? undefined : module?.version}
           Icon={onMap ? MapIcon : iconOf(current)}
           menu={small}
           onMenu={() => setDrawer(true)}
@@ -79,7 +79,8 @@ export function App() {
             </div>
           )}
           {!onMap && current === "geocoder" && <GeocoderPage version={module?.version} />}
-          {!onMap && current !== "geocoder" && <div class="empty">Nothing here yet.</div>}
+          {!onMap && current === "tiles" && <TilesPage version={module?.version} />}
+          {!onMap && current !== "geocoder" && current !== "tiles" && <div class="empty">Nothing here yet.</div>}
         </main>
       </div>
     </div>

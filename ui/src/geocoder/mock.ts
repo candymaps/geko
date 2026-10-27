@@ -43,16 +43,7 @@ export interface Hit {
   source: string;
 }
 
-export type Origin = "default" | "file" | "sql";
-
-export interface Setting {
-  key: string;
-  value: string;
-  fallback: string;
-  origin: Origin;
-  apply: "live" | "rebuild";
-  help: string;
-}
+import type { Setting } from "../panel";
 
 const wave = (n: number, base: number, amp: number, seed: number) =>
   Array.from({ length: n }, (_, i) => Math.max(0, base + Math.sin(i / 4 + seed) * amp + Math.sin(i * 1.7 + seed * 3) * amp * 0.35));

@@ -1,69 +1,15 @@
-import { Activity, Bug, Database, Info, Layers, Lock, Settings2, Zap, type LucideIcon } from "lucide-preact";
-import type { ComponentChildren } from "preact";
+import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
+import { Bars, Card, number, SettingsCard, size, Spark, Stat, Tabs, type Tab } from "../panel";
 import { useState } from "preact/hooks";
-import { mock, type Origin } from "./mock";
+import { mock } from "./mock";
 
-const TABS: { id: string; label: string; Icon: LucideIcon }[] = [
+const TABS: Tab[] = [
   { id: "overview", label: "Overview", Icon: Database },
   { id: "sources", label: "Sources", Icon: Layers },
   { id: "performance", label: "Performance", Icon: Activity },
   { id: "debugger", label: "Query debugger", Icon: Bug },
   { id: "config", label: "Configuration", Icon: Settings2 },
 ];
-
-const number = (n: number) => n.toLocaleString("en");
-const size = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
-
-function Card({ title, aside, children, wide }: { title: string; aside?: ComponentChildren; children: ComponentChildren; wide?: boolean }) {
-  return (
-    <section class={`gc-card${wide ? " wide" : ""}`}>
-      <header>
-        <h3>{title}</h3>
-        {aside && <span class="gc-aside">{aside}</span>}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div class="gc-stat">
-      <span class="gc-label">{label}</span>
-      <strong>{value}</strong>
-      {hint && <small>{hint}</small>}
-    </div>
-  );
-}
-
-function Spark({ data, unit }: { data: number[]; unit: string }) {
-  const max = Math.max(...data) * 1.1;
-  const w = 300;
-  const h = 64;
-  const points = data.map((v, i) => `${((i / (data.length - 1)) * w).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`);
-  return (
-    <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last hour, peak ${Math.max(...data).toFixed(1)} ${unit}`}>
-      <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} class="area" />
-      <polyline points={points.join(" ")} class="line" />
-    </svg>
-  );
-}
-
-function Bars({ rows }: { rows: { name: string; share: number }[] }) {
-  return (
-    <div class="gc-bars">
-      {rows.map((r) => (
-        <div class="row" key={r.name}>
-          <span>{r.name}</span>
-          <div class="track">
-            <div class="fill" style={{ width: `${r.share}%` }} />
-          </div>
-          <em>{r.share} %</em>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 function Overview({ version }: { version?: string }) {
   const i = mock.index;
@@ -139,27 +85,45 @@ function Overview({ version }: { version?: string }) {
 function Sources() {
   return (
     <div class="gc-grid">
-      {mock.sources.map((s) => (
-        <Card key={s.name} title={s.name} aside={<span class={`gc-pill ${s.enabled ? "ok" : "off"}`}>{s.enabled ? "Enabled" : "Disabled"}</span>}>
-          <p class="gc-scope">{s.scope}</p>
-          <div class="gc-stats">
-            <Stat label="Release" value={s.release} />
-            <Stat label="Downloaded" value={s.fetched} />
-            <Stat label="Records" value={number(s.records)} />
-            <Stat label="License" value={s.license} />
-          </div>
-          {Object.keys(s.options).length > 0 && (
-            <dl class="gc-options">
-              {Object.entries(s.options).map(([k, v]) => (
-                <div key={k}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </Card>
-      ))}
+      <Card title="Data sources of the index" wide aside="Merged into one record per entity">
+        <table class="gc-table">
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Covers</th>
+              <th>Status</th>
+              <th>Release</th>
+              <th>Downloaded</th>
+              <th>License</th>
+              <th class="num">Records</th>
+              <th>Options</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mock.sources.map((s) => (
+              <tr key={s.name}>
+                <td>{s.name}</td>
+                <td class="muted">{s.scope}</td>
+                <td>
+                  <span class={`gc-pill ${s.enabled ? "ok" : "off"}`}>{s.enabled ? "Enabled" : "Disabled"}</span>
+                </td>
+                <td>{s.release}</td>
+                <td>{s.fetched}</td>
+                <td>{s.license}</td>
+                <td class="num">{number(s.records)}</td>
+                <td>
+                  {Object.entries(s.options).map(([k, v]) => (
+                    <code key={k} class="gc-opt">
+                      {k} = {v}
+                    </code>
+                  ))}
+                  {Object.keys(s.options).length === 0 && <span class="muted">—</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </div>
   );
 }
@@ -302,66 +266,16 @@ function Debugger() {
   );
 }
 
-const ORIGINS: Record<Origin, string> = { default: "Default", file: "File", sql: "Database" };
-
-function Config() {
-  return (
-    <div class="gc-grid">
-      <Card title="Effective configuration" wide aside={<span class="gc-pill off"><Lock size={11} /> Read only</span>}>
-        <p class="gc-note">
-          <Info size={14} /> Each value comes from the default, from <code>geko-geocoder.toml</code> or, later, from the database. Changes that touch sources rebuild the index.
-        </p>
-        <table class="gc-table settings">
-          <thead>
-            <tr>
-              <th>Option</th>
-              <th>Value</th>
-              <th>Origin</th>
-              <th>Applies</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mock.settings.map((s) => (
-              <tr key={s.key}>
-                <td>
-                  <code>{s.key}</code>
-                  <small>{s.help}</small>
-                </td>
-                <td>
-                  <input value={s.value} readOnly disabled aria-label={s.key} />
-                  {s.value !== s.fallback && <small>default: {s.fallback}</small>}
-                </td>
-                <td>
-                  <span class={`gc-pill origin-${s.origin}`}>{ORIGINS[s.origin]}</span>
-                </td>
-                <td>
-                  <span class={`gc-pill ${s.apply === "live" ? "ok" : "warn"}`}>{s.apply === "live" ? "Live" : "Rebuild"}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-    </div>
-  );
-}
-
 export function GeocoderPage({ version }: { version?: string }) {
   const [tab, setTab] = useState("overview");
   return (
     <div class="gc">
-      <nav class="gc-tabs" role="tablist">
-        {TABS.map(({ id, label, Icon }) => (
-          <button key={id} role="tab" aria-selected={tab === id} class={tab === id ? "on" : undefined} onClick={() => setTab(id)}>
-            <Icon size={15} /> {label}
-          </button>
-        ))}
-      </nav>
+      <Tabs tabs={TABS} current={tab} onSelect={setTab} />
       {tab === "overview" && <Overview version={version} />}
       {tab === "sources" && <Sources />}
       {tab === "performance" && <Performance />}
       {tab === "debugger" && <Debugger />}
-      {tab === "config" && <Config />}
+      {tab === "config" && <SettingsCard settings={mock.settings} file="geko-geocoder.toml" rebuilds="sources rebuild the index" />}
     </div>
   );
 }

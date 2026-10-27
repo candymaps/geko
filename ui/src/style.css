@@ -284,14 +284,6 @@ body {
 .muted {
   color: var(--muted);
 }
-.version {
-  margin-left: 6px;
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--muted);
-  font-size: 12px;
-}
 
 main {
   position: relative;
@@ -608,26 +600,6 @@ main {
   color: var(--muted);
   font-size: 12px;
 }
-.gc-options {
-  display: grid;
-  gap: 4px;
-  margin: 14px 0 0;
-  padding-top: 12px;
-  border-top: 1px solid var(--frame);
-  font-size: 12px;
-}
-.gc-options div {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-.gc-options dt {
-  color: var(--muted);
-  font-family: ui-monospace, Consolas, monospace;
-}
-.gc-options dd {
-  margin: 0;
-}
 .gc-spark {
   display: block;
   width: 100%;
@@ -756,4 +728,63 @@ main {
   .gc-dot::after {
     animation: none;
   }
+}
+.gc-attr {
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+.gc-meter.wide {
+  width: 100%;
+  max-width: 160px;
+  margin-right: 0;
+}
+.gc-table td.bar {
+  width: 45%;
+}
+.gc-pct {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.gc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--content);
+}
+.gc-chip small {
+  color: var(--muted);
+}
+.gc-chip .swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.swatch.light {
+  background: #e9eef0;
+}
+.swatch.dark {
+  background: #34373d;
+}
+.swatch.white {
+  background: #fff;
+}
+.swatch.grayscale {
+  background: #b8b8b8;
+}
+.swatch.black {
+  background: #0b0b0b;
+}
+.gc-opt {
+  display: block;
+  white-space: nowrap;
 }
