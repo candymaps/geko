@@ -36,9 +36,9 @@ export const tone = (index: number) => index % TONES;
 /** The end of a pod's name: what tells replicas of one deployment apart. */
 export const shortName = (pod: string) => pod.split("-").slice(-1)[0] || pod;
 
-/** Above every panel of a view: which pods the panels below show. It is not drawn when there is none. */
+/** Above every panel of a view: which pods the panels below show. It is not drawn with one pod. */
 export function PodFilter({ pods, only, onPick }: { pods: PodData<unknown>[]; only: string | null; onPick: (pod: string) => void }) {
-  if (pods.length < 1) return null;
+  if (pods.length < 2) return null;
   return (
     <div class="gc-pods" role="group" aria-label="Pods shown">
       <span class="gc-label">Pods</span>
