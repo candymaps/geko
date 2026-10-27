@@ -29,6 +29,8 @@ Estado: la primera entrega está hecha en `feature/dashboard` (2026-10-26): el s
 
 El dashboard es plano de control, no de datos. En modo operador las peticiones de usuarios van del Ingress al pod del módulo sin pasar por geko; el shell, que es de administración, no está en ese camino y no lo compite.
 
+Hecho (2026-10-27): en modo operador lo sirve `geko operator`, que no tiene ningún módulo montado. Responde `/`, sus ficheros y `/admin/api/modules` (detrás de la clave de API, como siempre) a partir del ConfigMap y del estado de los `Deployment` y los `Job` de build: la versión es la etiqueta de la imagen que corre, y `unavailable` dice si ningún pod está listo, si se construye su bundle o si el build falló. El Ingress le manda `/`; lo que cada módulo sirve por sí mismo (`/docs`, `/openapi.yaml`, `/v1/attribution`, `/health`) sigue yendo al primer módulo, y `/<módulo>/` a su servicio, así que el mapa y el buscador no cambian. Los pods de cada módulo siguen sirviendo su propio shell, pero el Ingress no los usa para `/`.
+
 ### Diseño
 
 Basado en el backoffice de GOIB: un sidebar fijo (272 px abierto, 74 px plegado; `Ctrl + .` lo pliega), una barra superior de 60 px con el icono, el título y, en los módulos, su versión, y el contenido enmarcado, con margen, borde claro y la sombra de las tarjetas. Bajo 1024 px el sidebar flota sobre el contenido; bajo 768 px es un menú lateral. El tema claro y el oscuro siguen al sistema. El color primario es `#A4CC47`, con un verde más oscuro para el texto y los iconos sobre fondo claro.
@@ -70,7 +72,6 @@ Por ahora el dashboard no cambia nada. Las acciones (reconstruir, recargar bundl
 
 1. **Claves de API.** Con claves activas, `/` y sus ficheros cargan sin clave, pero el dashboard llama a `/admin/api/*` y a las rutas de los módulos, y recibirían 401. Hace falta una forma de que el dashboard tenga la clave (un campo que la pida y la guarde, o una cabecera) sin dejarla en la URL.
 2. **Refrescar al llegar un bundle nuevo.** El dashboard lee la lista de módulos una sola vez; si se reconstruye con otro ámbito, hay que recargar la página. Un sondeo ligero de `/health` (que trae el bundle) lo cerraría.
-3. **Lista de módulos en modo operador.** El endpoint lo responde el operador a partir del ConfigMap y del estado de los `Deployment`. Hay que decidirlo junto con las rutas comunes (OPERATOR_MODE_PLAN, «Por decidir», 3).
-4. **Compartir Preact** entre shell y paneles (*import map*) o paneles autocontenidos.
-5. **Brotli o gzip** para los estáticos incrustados, según la medida de tamaño y el coste de CPU al arrancar.
-6. **Limitar el mapa al ámbito.** Se probó (2026-10-26) que cada módulo declarase el área de su parte (`Built::bounds`) y que el host las uniera y las sirviera; se retiró. El host solo tiene el ámbito como códigos ISO, sin geometría, y no conoce las fuentes de cada módulo. Si se retoma, hace falta una fuente común de cajas por región; una sola caja, además, deja huecos con ámbitos separados (Baleares y Canarias).
+3. **Compartir Preact** entre shell y paneles (*import map*) o paneles autocontenidos.
+4. **Brotli o gzip** para los estáticos incrustados, según la medida de tamaño y el coste de CPU al arrancar.
+5. **Limitar el mapa al ámbito.** Se probó (2026-10-26) que cada módulo declarase el área de su parte (`Built::bounds`) y que el host las uniera y las sirviera; se retiró. El host solo tiene el ámbito como códigos ISO, sin geometría, y no conoce las fuentes de cada módulo. Si se retoma, hace falta una fuente común de cajas por región; una sola caja, además, deja huecos con ámbitos separados (Baleares y Canarias).
