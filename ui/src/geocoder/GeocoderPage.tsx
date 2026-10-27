@@ -1,5 +1,7 @@
 import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
-import { Bars, Card, number, SettingsCard, size, Spark, Stat, Tabs, type Tab } from "../panel";
+import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
+import { useApi } from "../api";
+import type { Stats, Status } from "./api";
 import { useState } from "preact/hooks";
 import { mock } from "./mock";
 
@@ -11,32 +13,52 @@ const TABS: Tab[] = [
   { id: "config", label: "Configuration", Icon: Settings2 },
 ];
 
-function Overview({ version }: { version?: string }) {
+const stamp = (unix: number) => `${new Date(unix * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+const region = (() => {
+  try {
+    const names = new Intl.DisplayNames(["en"], { type: "region" });
+    return (code: string) => names.of(code) ?? code;
+  } catch {
+    return (code: string) => code;
+  }
+})();
+const bytes = (n: number) => size(n / 1048576);
+const ms = (v: number | null) => (v === null ? "—" : `${v} ms`);
+const percent = (part: number, whole: number) => (whole === 0 ? "—" : `${((part / whole) * 100).toFixed(1)} %`);
+
+function Sample() {
+  return <span class="gc-pill off">Sample data</span>;
+}
+
+function Overview({ status, version }: { status: Status; version?: string }) {
   const i = mock.index;
   const totals = i.countries.reduce((t, c) => ({ a: t.a + c.addresses, s: t.s + c.streets, p: t.p + c.pois, l: t.l + c.places }), { a: 0, s: 0, p: 0, l: 0 });
+  const countries = status.countries ?? [];
+  const disk = countries.reduce((t, c) => t + c.bytes, 0);
   return (
     <div class="gc-grid">
-      <Card title="Bundle" aside={<span class="gc-pill ok"><i class="gc-dot" /> Serving</span>}>
+      <Card
+        title="Bundle"
+        aside={
+          status.ready ? (
+            <span class="gc-pill ok">
+              <i class="gc-dot" /> Serving
+            </span>
+          ) : (
+            <span class="gc-pill warn">No bundle loaded</span>
+          )
+        }
+      >
         <div class="gc-stats">
           {version && <Stat label="Module" value={version} />}
-          <Stat label="Bundle" value={i.bundle} />
-          <Stat label="Built" value={i.built} hint={`took ${i.buildTime}`} />
-          <Stat label="Next build" value={i.nextBuild} />
+          <Stat label="Bundle" value={status.bundle?.version ?? "—"} />
+          <Stat label="Built" value={status.bundle ? stamp(status.bundle.created_unix) : "—"} />
         </div>
       </Card>
-      <Card title="Memory and disk">
+      <Card title="Disk">
         <div class="gc-stats">
-          <Stat label="Pinned in RAM" value={size(i.ramHotMb)} hint="hot part of the index" />
-          <Stat label="Memory-mapped" value={size(i.mappedMb)} hint="cold part" />
-          <Stat label="On disk" value={size(i.diskMb)} />
-        </div>
-      </Card>
-      <Card title="Entities" wide>
-        <div class="gc-stats four">
-          <Stat label="Addresses" value={number(totals.a)} />
-          <Stat label="Streets" value={number(totals.s)} />
-          <Stat label="POIs" value={number(totals.p)} />
-          <Stat label="Places" value={number(totals.l)} />
+          <Stat label="On disk" value={bytes(disk)} hint="the index of the countries served" />
+          <Stat label="Countries" value={String(countries.length)} />
         </div>
       </Card>
       <Card title="Countries served" wide>
@@ -44,30 +66,30 @@ function Overview({ version }: { version?: string }) {
           <thead>
             <tr>
               <th>Country</th>
-              <th class="num">Addresses</th>
-              <th class="num">Streets</th>
-              <th class="num">POIs</th>
-              <th class="num">Places</th>
-              <th class="num">Size</th>
+              <th class="num">On disk</th>
             </tr>
           </thead>
           <tbody>
-            {i.countries.map((c) => (
+            {countries.map((c) => (
               <tr key={c.code}>
                 <td>
-                  <span class="gc-code">{c.code}</span> {c.name}
+                  <span class="gc-code">{c.code}</span> {region(c.code)}
                 </td>
-                <td class="num">{number(c.addresses)}</td>
-                <td class="num">{number(c.streets)}</td>
-                <td class="num">{number(c.pois)}</td>
-                <td class="num">{number(c.places)}</td>
-                <td class="num">{size(c.sizeMb)}</td>
+                <td class="num">{bytes(c.bytes)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
-      <Card title="Last build" wide>
+      <Card title="Entities" wide aside={<Sample />}>
+        <div class="gc-stats four">
+          <Stat label="Addresses" value={number(totals.a)} />
+          <Stat label="Streets" value={number(totals.s)} />
+          <Stat label="POIs" value={number(totals.p)} />
+          <Stat label="Places" value={number(totals.l)} />
+        </div>
+      </Card>
+      <Card title="Last build" wide aside={<Sample />}>
         <ol class="gc-steps">
           {mock.pipeline.map((s) => (
             <li key={s.stage} class={s.state}>
@@ -82,7 +104,10 @@ function Overview({ version }: { version?: string }) {
   );
 }
 
-function Sources() {
+function Sources({ status }: { status: Status }) {
+  const sources = status.sources ?? [];
+  const enabled = (id: string) => status.source_options[id]?.enabled !== false;
+  const options = (id: string) => Object.entries(status.source_options[id] ?? {}).filter(([k]) => k !== "enabled");
   return (
     <div class="gc-grid">
       <Card title="Data sources of the index" wide aside="Merged into one record per entity">
@@ -90,34 +115,36 @@ function Sources() {
           <thead>
             <tr>
               <th>Source</th>
-              <th>Covers</th>
               <th>Status</th>
-              <th>Release</th>
-              <th>Downloaded</th>
               <th>License</th>
-              <th class="num">Records</th>
+              <th>Attribution</th>
               <th>Options</th>
             </tr>
           </thead>
           <tbody>
-            {mock.sources.map((s) => (
-              <tr key={s.name}>
-                <td>{s.name}</td>
-                <td class="muted">{s.scope}</td>
+            {sources.map((s) => (
+              <tr key={s.id}>
                 <td>
-                  <span class={`gc-pill ${s.enabled ? "ok" : "off"}`}>{s.enabled ? "Enabled" : "Disabled"}</span>
+                  {s.url ? (
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.id}
+                    </a>
+                  ) : (
+                    s.id
+                  )}
                 </td>
-                <td>{s.release}</td>
-                <td>{s.fetched}</td>
-                <td>{s.license}</td>
-                <td class="num">{number(s.records)}</td>
                 <td>
-                  {Object.entries(s.options).map(([k, v]) => (
+                  <span class={`gc-pill ${enabled(s.id) ? "ok" : "off"}`}>{enabled(s.id) ? "Enabled" : "Disabled"}</span>
+                </td>
+                <td>{s.name}</td>
+                <td class="muted">{s.attribution}</td>
+                <td>
+                  {options(s.id).map(([k, v]) => (
                     <code key={k} class="gc-opt">
-                      {k} = {v}
+                      {k} = {String(v)}
                     </code>
                   ))}
-                  {Object.keys(s.options).length === 0 && <span class="muted">—</span>}
+                  {options(s.id).length === 0 && <span class="muted">—</span>}
                 </td>
               </tr>
             ))}
@@ -129,28 +156,34 @@ function Sources() {
 }
 
 function Performance() {
+  const { data: stats, error } = useApi<Stats>("/geocoder/v1/stats", 10_000);
   const p = mock.performance;
+  if (!stats) return <Placeholder error={error} module="geocoder" />;
+  const lookups = stats.cache.hits + stats.cache.misses;
+  const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
+  const total = stats.routes.reduce((t, r) => t + r.requests, 0);
   return (
     <div class="gc-grid">
-      <Card title="Requests per second" aside={p.window}>
-        <Spark data={p.rps} unit="req/s" />
+      <Card title="Requests per second" aside="Last 60 minutes">
+        <Spark data={stats.last_hour.requests.map((n) => n / 60)} unit="req/s" />
       </Card>
-      <Card title="p99 latency (ms)" aside={p.window}>
-        <Spark data={p.p99} unit="ms" />
+      <Card title="p99 latency (ms)" aside="Last 60 minutes">
+        <Spark data={stats.last_hour.p99_ms.map((v) => v ?? 0)} unit="ms" />
       </Card>
-      <Card title="Health of the answers" wide>
+      <Card title="Health of the answers" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
-          <Stat label="Budget exhausted" value={`${p.budgetExhausted} %`} hint="queries cut by the time budget" />
-          <Stat label="Without results" value={`${p.emptyRate} %`} />
-          <Stat label="Cache hits" value={`${p.cacheHit} %`} hint={`${number(p.cacheEntries)} entries`} />
-          <Stat label="Duplicates merged" value="0" hint="each one is a fusion miss" />
+          <Stat label="Budget exhausted" value={percent(stats.cut_short, stats.searches)} hint="searches cut by the time budget" />
+          <Stat label="Without results" value={percent(stats.empty, stats.searches)} hint={`${number(stats.searches)} searches`} />
+          <Stat label="Cache hits" value={stats.cache.enabled ? percent(stats.cache.hits, lookups) : "Off"} hint={stats.cache.enabled ? `${number(lookups)} lookups` : "serve.cache_entries is 0"} />
+          <Stat label="Duplicates merged" value={number(stats.merged_duplicates)} hint="each one is a fusion miss" />
         </div>
       </Card>
-      <Card title="Latency by route" wide>
+      <Card title="Latency by route" wide aside="Upper bound of the bucket each percentile falls in">
         <table class="gc-table">
           <thead>
             <tr>
               <th>Route</th>
+              <th class="num">Requests</th>
               <th class="num">req/s</th>
               <th class="num">p50</th>
               <th class="num">p95</th>
@@ -159,22 +192,30 @@ function Performance() {
             </tr>
           </thead>
           <tbody>
-            {p.routes.map((r) => (
+            {stats.routes.map((r) => (
               <tr key={r.route}>
                 <td>
-                  <code>{r.route}</code>
+                  <code>/{r.route}</code>
                 </td>
-                <td class="num">{r.rps}</td>
-                <td class="num">{r.p50} ms</td>
-                <td class="num">{r.p95} ms</td>
-                <td class="num">{r.p99} ms</td>
-                <td class="num">{r.errors} %</td>
+                <td class="num">{number(r.requests)}</td>
+                <td class="num">{(r.requests / uptime).toFixed(2)}</td>
+                <td class="num">{ms(r.p50_ms)}</td>
+                <td class="num">{ms(r.p95_ms)}</td>
+                <td class="num">{ms(r.p99_ms)}</td>
+                <td class="num">{percent(r.errors, r.requests)}</td>
               </tr>
             ))}
+            {total === 0 && (
+              <tr>
+                <td colSpan={7} class="muted">
+                  Nothing has been asked yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>
-      <Card title="Confidence of the first result">
+      <Card title="Confidence of the first result" aside={<Sample />}>
         <div class="gc-hist" role="img" aria-label="Distribution of confidence, from 0 to 1">
           {p.confidence.map((v, i) => (
             <div key={i} class="col" style={{ height: `${v}%` }} title={`${i / 10}–${(i + 1) / 10}: ${v} %`} />
@@ -186,10 +227,10 @@ function Performance() {
           <span>1</span>
         </div>
       </Card>
-      <Card title="Layer of the first result">
+      <Card title="Layer of the first result" aside={<Sample />}>
         <Bars rows={p.layers} />
       </Card>
-      <Card title="Slowest queries" wide aside="No text is kept unless enabled">
+      <Card title="Slowest queries" wide aside={<Sample />}>
         <table class="gc-table">
           <tbody>
             {p.slow.map((q) => (
@@ -266,16 +307,46 @@ function Debugger() {
   );
 }
 
+const HELP: Record<string, string> = {
+  "serve.countries": "Countries this node serves; empty means every country of the bundle.",
+  "serve.search_budget_ms": "Time budget of a search; the likeliest reading always completes (0: none).",
+  "serve.autocomplete_budget_ms": "Time budget of an autocomplete request (0: none).",
+  "serve.slow_query_ms": "Requests slower than this are logged with their query (0: none).",
+  "serve.same_entity_m": "Results with the same name closer than this, in metres, are merged.",
+  "serve.batch_max": "Most requests in one batch.",
+  "serve.cache_entries": "Answers kept for repeated queries, about 2.5 KB each (0: none).",
+};
+
+const shown = (v: unknown) => (Array.isArray(v) ? (v.length ? v.join(", ") : "all") : String(v));
+
+function settingsOf(status: Status): Setting[] {
+  const serve = status.serve.map<Setting>((s) => ({
+    key: s.key,
+    value: shown(s.value),
+    fallback: shown(s.default),
+    origin: shown(s.value) === shown(s.default) ? "default" : "file",
+    apply: "restart",
+    help: HELP[s.key] ?? "",
+  }));
+  const sources = Object.entries(status.source_options).flatMap(([id, table]) =>
+    Object.entries(table).map<Setting>(([k, v]) => ({ key: `sources.${id}.${k}`, value: shown(v), fallback: shown(v), origin: "file", apply: "rebuild", help: "" })),
+  );
+  return [...serve, ...sources];
+}
+
 export function GeocoderPage({ version }: { version?: string }) {
   const [tab, setTab] = useState("overview");
+  const { data: status, error } = useApi<Status>("/geocoder/v1/status", 30_000);
+  const needsStatus = tab !== "performance" && tab !== "debugger";
   return (
     <div class="gc">
       <Tabs tabs={TABS} current={tab} onSelect={setTab} />
-      {tab === "overview" && <Overview version={version} />}
-      {tab === "sources" && <Sources />}
       {tab === "performance" && <Performance />}
       {tab === "debugger" && <Debugger />}
-      {tab === "config" && <SettingsCard settings={mock.settings} file="geko-geocoder.toml" rebuilds="sources rebuild the index" />}
+      {needsStatus && !status && <Placeholder error={error} module="geocoder" />}
+      {status && tab === "overview" && <Overview status={status} version={version} />}
+      {status && tab === "sources" && <Sources status={status} />}
+      {status && tab === "config" && <SettingsCard settings={settingsOf(status)} file="geko-geocoder.toml" rebuilds="sources rebuild the index" />}
     </div>
   );
 }

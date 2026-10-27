@@ -1,0 +1,154 @@
+import type { ModuleInfo } from "../api";
+import type { RouteStats, Stats, Status } from "../geocoder/api";
+import type { RouteStats as TileRouteStats, Stats as TileStats, Status as TileStatus } from "../tiles/api";
+
+const now = () => Math.floor(Date.now() / 1000);
+
+const modules: ModuleInfo[] = [
+  { name: "geocoder", version: "0.1.0", unavailable: null },
+  { name: "tiles", version: "0.1.0", unavailable: null },
+];
+
+const status = (): Status => ({
+  ready: true,
+  bundle: { version: "v2026-10-27T161913", created_unix: now() - 7200 },
+  countries: [
+    { code: "ES", bytes: 2_076_000_000 },
+    { code: "PT", bytes: 214_000_000 },
+  ],
+  sources: [
+    { id: "osm", name: "ODbL 1.0", attribution: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright" },
+    { id: "overture", name: "CDLA-Permissive-2.0", attribution: "© Overture Maps Foundation, places", url: null },
+    { id: "cartociudad", name: "CC BY 4.0", attribution: "CartoCiudad CC BY 4.0 scne.es", url: null },
+  ],
+  source_options: { overture: { enabled: true, min_confidence: 0.8 }, osm: { mirror: "auto" } },
+  serve: [
+    { key: "serve.countries", value: ["ES", "PT"], default: [] },
+    { key: "serve.search_budget_ms", value: 15, default: 15 },
+    { key: "serve.autocomplete_budget_ms", value: 5, default: 5 },
+    { key: "serve.slow_query_ms", value: 50, default: 50 },
+    { key: "serve.same_entity_m", value: 100, default: 100 },
+    { key: "serve.batch_max", value: 100, default: 100 },
+    { key: "serve.cache_entries", value: 50_000, default: 0 },
+  ],
+});
+
+const route = (name: string, requests: number, errors: number, p50: number | null, p95: number | null, p99: number | null): RouteStats => ({
+  route: name,
+  requests,
+  errors,
+  p50_ms: p50,
+  p95_ms: p95,
+  p99_ms: p99,
+});
+
+const stats = (): Stats => ({
+  since_unix: now() - 5400,
+  routes: [
+    route("v1/search", 13_204, 12, 1, 5, 10),
+    route("v1/autocomplete", 41_880, 3, 0.5, 2.5, 5),
+    route("v1/search/structured", 120, 0, 2.5, 10, 25),
+    route("v1/reverse", 5_902, 0, 0.25, 0.5, 1),
+    route("v1/place/{id}", 811, 4, 0.1, 0.25, 0.5),
+    route("v1/batch", 0, 0, null, null, null),
+  ],
+  searches: 55_084,
+  empty: 1_760,
+  cut_short: 221,
+  merged_duplicates: 0,
+  cache: { enabled: true, hits: 33_100, misses: 21_984 },
+  last_hour: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(900 + Math.sin(i / 5) * 260 + Math.random() * 120)),
+    p99_ms: Array.from({ length: 60 }, (_, i) => 5 + Math.round((Math.sin(i / 4) + 1) * 2.5)),
+  },
+});
+
+const tileStatus = (): TileStatus => ({
+  ready: true,
+  bundle: { version: "v2026-10-27T161913", created_unix: now() - 7200 },
+  tiles: {
+    count: 8_412_960,
+    distinct: 6_101_332,
+    data_bytes: 1_198_000_000,
+    index_bytes: 134_607_360,
+    format: "mvt",
+    compression: "gzip",
+    min_zoom: 0,
+    max_zoom: 14,
+    description: "Vector tiles of geko, with the schema of the Protomaps Basemap 4.9.0",
+    attribution: '<a href="https://github.com/protomaps/basemaps">Protomaps</a> © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    bounds: [-18.2, 27.6, 4.4, 43.9],
+    center: [-6.9, 35.75, 6],
+    layers: ["earth", "water", "landuse", "natural", "roads", "buildings", "places", "pois", "boundaries", "transit"],
+  },
+  styles: { flavors: ["light", "dark", "white", "grayscale", "black"], languages: 41, fonts: ["Noto Sans Regular", "Noto Sans Medium", "Noto Sans Italic"], sprites: 5 },
+  sources: [
+    { id: "osm", name: "ODbL 1.0", attribution: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright" },
+    { id: "natural-earth", name: "Public domain", attribution: "Made with Natural Earth", url: null },
+    { id: "protomaps", name: "BSD-3-Clause", attribution: "Map styles of Protomaps", url: null },
+  ],
+  settings: [
+    { key: "format", value: "mvt", default: "mvt", apply: "rebuild" },
+    { key: "url", value: "https://maps.example.com/tiles", default: "/tiles", apply: "restart" },
+    { key: "osm.mirror", value: "auto", default: "auto", apply: "rebuild" },
+    { key: "planetiler.memory", value: "6g", default: "4g", apply: "rebuild" },
+    { key: "planetiler.threads", value: 0, default: 0, apply: "rebuild" },
+    { key: "planetiler.storage", value: "mmap", default: "mmap", apply: "rebuild" },
+    { key: "planetiler.qrank", value: true, default: true, apply: "rebuild" },
+  ],
+});
+
+const tileRoute = (name: string, requests: number, errors: number, p50: number | null, p95: number | null, p99: number | null): TileRouteStats => ({
+  route: name,
+  requests,
+  errors,
+  p50_us: p50,
+  p95_us: p95,
+  p99_us: p99,
+});
+
+const tileStats = (): TileStats => ({
+  since_unix: now() - 5400,
+  routes: [
+    tileRoute("{z}/{x}/{y}", 2_400_120, 310, 2, 5, 25),
+    tileRoute("tilejson.json", 1_204, 0, 5, 10, 25),
+    tileRoute("styles.json", 88, 0, 5, 10, 25),
+    tileRoute("styles/{flavor}/{lang}", 940, 1, 25, 100, 250),
+    tileRoute("fonts/{fontstack}/{range}", 31_880, 40, 5, 25, 50),
+    tileRoute("sprites/{name}", 3_020, 0, 5, 10, 25),
+  ],
+  zooms: [
+    { zoom: 0, tiles: 1_200, empty: 0, bytes: 14_400_000 },
+    { zoom: 4, tiles: 9_800, empty: 120, bytes: 372_000_000 },
+    { zoom: 8, tiles: 104_000, empty: 9_900, bytes: 7_400_000_000 },
+    { zoom: 12, tiles: 610_000, empty: 190_000, bytes: 17_700_000_000 },
+    { zoom: 14, tiles: 960_000, empty: 515_000, bytes: 13_400_000_000 },
+  ],
+  styles: [
+    { style: "light/en", requests: 410 },
+    { style: "dark/en", requests: 220 },
+    { style: "light/es", requests: 180 },
+    { style: "dark/es", requests: 90 },
+    { style: "white/en", requests: 40 },
+  ],
+  last_hour: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(36_000 + Math.sin(i / 5) * 9_000 + Math.random() * 4_000)),
+    p99_us: Array.from({ length: 60 }, (_, i) => (i % 17 === 0 ? 50 : 25)),
+  },
+});
+
+const routes: Record<string, () => unknown> = {
+  "/admin/api/modules": () => modules,
+  "/geocoder/v1/status": status,
+  "/geocoder/v1/stats": stats,
+  "/tiles/status.json": tileStatus,
+  "/tiles/stats.json": tileStats,
+};
+
+export function mockGet(path: string): unknown {
+  const answer = routes[path];
+  if (!answer) throw new Error(`${path} has no sample data`);
+  return answer();
+}

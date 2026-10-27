@@ -1,10 +1,11 @@
-import { Map as MapIcon } from "lucide-preact";
+import { Earth } from "lucide-preact";
 import type { ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
-import { listModules, type ModuleInfo } from "./api";
+import { useApi, type ModuleInfo } from "./api";
 import { GeocoderPage } from "./geocoder/GeocoderPage";
 import { TilesPage } from "./tiles/TilesPage";
 import { useMedia, useRoute, useStored } from "./hooks";
+import { ModeToggle, useSource } from "./source";
 import { capitalize, iconOf, Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 
@@ -13,8 +14,10 @@ const MAP = "map";
 type MapPageProps = Parameters<typeof import("./MapPage").MapPage>[0];
 
 export function App() {
-  const [modules, setModules] = useState<ModuleInfo[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { mode, up } = useSource();
+  const { data, error } = useApi<ModuleInfo[]>("/admin/api/modules");
+  const modules = data ?? (error !== null ? [] : null);
+  const offline = mode === "live" && up === false;
   const [route, go] = useRoute();
   const [wide, setWide] = useStored("geko.sidebar", true);
   const [peek, setPeek] = useState(false);
@@ -26,21 +29,15 @@ export function App() {
   const [MapPage, setMapPage] = useState<ComponentType<MapPageProps> | null>(null);
 
   useEffect(() => {
-    listModules().then(setModules, (e: Error) => {
-      setError(e.message);
-      setModules([]);
-    });
-  }, []);
-
-  useEffect(() => {
     if (modules) import("./MapPage").then((m) => setMapPage(() => m.MapPage));
   }, [modules]);
 
   const current = route || MAP;
   const module = modules?.find((m) => m.name === current);
   const onMap = current === MAP || (modules !== null && !module);
-  const geocoder = modules?.some((m) => m.name === "geocoder") ?? false;
-  const tiles = modules?.some((m) => m.name === "tiles" && !m.unavailable) ?? false;
+  // The map talks to geko itself: it has no sample data.
+  const geocoder = (modules?.some((m) => m.name === "geocoder") ?? false) && mode === "live";
+  const tiles = (modules?.some((m) => m.name === "tiles" && !m.unavailable) ?? false) && mode === "live";
 
   const open = small ? true : large ? wide : peek;
   const toggle = () => (large ? setWide(!wide) : setPeek(!peek));
@@ -67,15 +64,17 @@ export function App() {
       <div class="column">
         <Topbar
           title={onMap ? "Map" : capitalize(current)}
-          Icon={onMap ? MapIcon : iconOf(current)}
+          Icon={onMap ? Earth : iconOf(current)}
           menu={small}
           onMenu={() => setDrawer(true)}
+          actions={<ModeToggle />}
         />
         <main>
-          {error && <p class="error">{error}</p>}
+          {offline && <p class="error">geko does not answer. Start it, or switch to Mock.</p>}
+          {!offline && error && <p class="error">{error}</p>}
           {MapPage && (
             <div class="page" hidden={!onMap}>
-              <MapPage geocoder={geocoder} tiles={tiles} active={onMap} />
+              <MapPage key={mode} geocoder={geocoder} tiles={tiles} active={onMap} />
             </div>
           )}
           {!onMap && current === "geocoder" && <GeocoderPage version={module?.version} />}

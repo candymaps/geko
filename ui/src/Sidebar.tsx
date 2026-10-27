@@ -1,7 +1,7 @@
-import { BookOpen, Box, Layers, Map as MapIcon, PanelLeftClose, PanelLeftOpen, Search, type LucideIcon } from "lucide-preact";
+import { BookOpen, Box, Earth, Layers, MapPinned, PanelLeftClose, PanelLeftOpen, type LucideIcon } from "lucide-preact";
 import type { ModuleInfo } from "./api";
 
-const ICONS: Record<string, LucideIcon> = { geocoder: Search, tiles: Layers };
+const ICONS: Record<string, LucideIcon> = { geocoder: MapPinned, tiles: Layers };
 
 const modifier = /Mac/i.test(navigator.userAgent) ? "⌘" : "Ctrl";
 
@@ -50,7 +50,7 @@ export function Sidebar({ modules, route, open, drawer, onToggle, onNavigate }: 
         )}
       </div>
       <nav>
-        {link("map", "Map", MapIcon)}
+        {link("map", "Map", Earth)}
         {modules.length > 0 && <div class="eyebrow">Modules</div>}
         {modules.map((m) => link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable))}
       </nav>

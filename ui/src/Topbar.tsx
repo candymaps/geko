@@ -1,13 +1,15 @@
 import { Menu, type LucideIcon } from "lucide-preact";
+import type { ComponentChildren } from "preact";
 
 interface Props {
   title: string;
   Icon: LucideIcon;
   menu: boolean;
   onMenu: () => void;
+  actions?: ComponentChildren;
 }
 
-export function Topbar({ title, Icon, menu, onMenu }: Props) {
+export function Topbar({ title, Icon, menu, onMenu, actions }: Props) {
   return (
     <header class="topbar">
       {menu && (
@@ -21,6 +23,7 @@ export function Topbar({ title, Icon, menu, onMenu }: Props) {
       <div class="crumbs">
         <h1>{title}</h1>
       </div>
+      {actions && <div class="actions">{actions}</div>}
     </header>
   );
 }

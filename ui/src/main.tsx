@@ -1,5 +1,11 @@
 import { render } from "preact";
 import { App } from "./App";
+import { SourceProvider } from "./source";
 import "./style.css";
 
-render(<App />, document.getElementById("app")!);
+render(
+  <SourceProvider>
+    <App />
+  </SourceProvider>,
+  document.getElementById("app")!,
+);
