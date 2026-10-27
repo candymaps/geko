@@ -1,3 +1,5 @@
+import { groupBy, sumWindow, total, worst, worstWindow } from "../pods";
+
 export interface Status {
   ready: boolean;
   bundle: { version: string; created_unix: number } | null;
@@ -26,4 +28,32 @@ export interface Stats {
   cache: { enabled: boolean; hits: number; misses: number };
   last_hour: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
   last_minute: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
+}
+
+/** The counters of several pods as one: what is added is added, and a percentile is the worst of the pods (see `worstWindow`). */
+export function combine(list: Stats[]): Stats {
+  const window = (w: (s: Stats) => Stats["last_hour"]): Stats["last_hour"] => {
+    const sum = sumWindow(list.map((s) => w(s)));
+    const worst = worstWindow(list.map((s) => ({ end_unix: w(s).end_unix, p99: w(s).p99_ms })));
+    return { end_unix: sum.end_unix, requests: sum.requests, p99_ms: worst.p99 };
+  };
+  const all = list.flatMap((s) => s.routes);
+  return {
+    since_unix: Math.min(...list.map((s) => s.since_unix)),
+    routes: groupBy(all, (r) => r.route, (rows) => ({
+      route: rows[0].route,
+      requests: total(rows.map((r) => r.requests)),
+      errors: total(rows.map((r) => r.errors)),
+      p50_ms: worst(rows.map((r) => r.p50_ms)),
+      p95_ms: worst(rows.map((r) => r.p95_ms)),
+      p99_ms: worst(rows.map((r) => r.p99_ms)),
+    })),
+    searches: total(list.map((s) => s.searches)),
+    empty: total(list.map((s) => s.empty)),
+    cut_short: total(list.map((s) => s.cut_short)),
+    merged_duplicates: total(list.map((s) => s.merged_duplicates)),
+    cache: { enabled: list.some((s) => s.cache.enabled), hits: total(list.map((s) => s.cache.hits)), misses: total(list.map((s) => s.cache.misses)) },
+    last_hour: window((s) => s.last_hour),
+    last_minute: window((s) => s.last_minute),
+  };
 }

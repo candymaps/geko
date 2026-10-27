@@ -3,7 +3,8 @@ import { useTab } from "../hooks";
 import { useApi } from "../api";
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { mock } from "./mock";
-import type { Stats, Status } from "./api";
+import { combine, type Stats, type Status } from "./api";
+import { NoPods, PodFilter, podSeries, usePodView, usePods } from "../pods";
 
 const TABS: Tab[] = [
   { id: "overview", label: "Overview", Icon: Database },
@@ -127,8 +128,20 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { data: stats, error } = useApi<Stats>("/tiles/stats.json", 1_000);
-  if (!stats) return <Placeholder error={error} module="tiles" />;
+  const { pods, error, filter, shown, stats } = usePodView<Stats>("tiles", "tiles/stats.json", combine);
+  if (!pods) return <Placeholder error={error} module="tiles" />;
+  const filtered = <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />;
+  if (!stats) {
+    return (
+      <>
+        {filtered}
+        <NoPods pods={pods} />
+      </>
+    );
+  }
+  const worstOf = shown.length > 1 ? "; with several pods, the worst of them" : "";
+  const minute = stats.last_minute;
+  const per = (pick: (s: Stats) => (number | null)[]) => (data: Stats) => ({ end_unix: data.last_minute.end_unix, values: pick(data).map((v) => v ?? 0) });
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
   const served = stats.zooms.reduce((t, z) => t + z.tiles, 0);
   const empty = stats.zooms.reduce((t, z) => t + z.empty, 0);
@@ -137,12 +150,14 @@ function Performance() {
   const errors = stats.routes.reduce((t, r) => t + r.errors, 0);
   const share = (n: number) => (requests === 0 ? 0 : Math.round((n / requests) * 1000) / 10);
   return (
+    <>
+    {filtered}
     <div class="gc-grid">
       <Card title="Requests per second" aside="Last 60 seconds">
-        <Spark data={stats.last_minute.requests} unit="req/s" />
+        <Spark series={podSeries(shown, per((s) => s.last_minute.requests), minute.end_unix, minute.requests)} unit="req/s" />
       </Card>
-      <Card title="p99 time in the module (µs)" aside="Last 60 seconds">
-        <Spark data={stats.last_minute.p99_us.map((v) => v ?? 0)} unit="µs" />
+      <Card title="p99 time in the module (µs)" aside={`Last 60 seconds${worstOf}`}>
+        <Spark series={podSeries(shown, per((s) => s.last_minute.p99_us), minute.end_unix)} unit="µs" />
       </Card>
       <Card title="Served" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
@@ -188,7 +203,7 @@ function Performance() {
           </tbody>
         </table>
       </Card>
-      <Card title="Time in the module by route" wide aside="Upper bound of the bucket each percentile falls in">
+      <Card title="Time in the module by route" wide aside={`Upper bound of the bucket each percentile falls in${worstOf}`}>
         <table class="gc-table">
           <thead>
             <tr>
@@ -228,11 +243,14 @@ function Performance() {
         />
       </Card>
     </div>
+    </>
   );
 }
 
 function Styles({ status }: { status: Status }) {
-  const { data: stats } = useApi<Stats>("/tiles/stats.json", 30_000);
+  const { pods } = usePods<Stats>("tiles", "tiles/stats.json", 30_000);
+  const answered = (pods ?? []).flatMap((p) => (p.data ? [p.data] : []));
+  const stats = answered.length > 0 ? combine(answered) : null;
   const s = status.styles;
   const top = stats?.styles ?? [];
   const total = top.reduce((t, x) => t + x.requests, 0);

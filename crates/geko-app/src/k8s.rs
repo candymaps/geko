@@ -34,7 +34,7 @@ pub struct Options {
 const DATA_CLAIM: &str = "geko-data";
 /// The config map with `geko.toml` and the `geko-<module>.toml` files, which the overlays generate.
 pub const CONFIG_MAP: &str = "geko";
-const PORT: u16 = 8080;
+pub(crate) const PORT: u16 = 8080;
 /// The deployment and the service of the operator, and the label that its resources carry.
 pub const OPERATOR: &str = "geko-operator";
 /// The paths that every module serves for itself, which the Ingress sends to the first one.
@@ -95,6 +95,8 @@ pub fn install(options: &Options, operator_image: &str) -> String {
             "rules": [
                 { "apiGroups": [""], "resources": ["configmaps"], "verbs": ["get", "list", "watch"] },
                 { "apiGroups": [""], "resources": ["services"], "verbs": manage },
+                // The pods of each module, to ask each of them for its own state (the replicas keep their own counters).
+                { "apiGroups": [""], "resources": ["pods"], "verbs": ["get", "list"] },
                 // The claim of the volume is created and never deleted: it holds the bundles.
                 { "apiGroups": [""], "resources": ["persistentvolumeclaims"], "verbs": ["get", "list", "watch", "create", "patch"] },
                 { "apiGroups": ["apps"], "resources": ["deployments"], "verbs": manage },

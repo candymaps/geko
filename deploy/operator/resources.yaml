@@ -40,6 +40,13 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - "pods"
+    verbs:
+      - "get"
+      - "list"
+  - apiGroups:
+      - ""
+    resources:
       - "persistentvolumeclaims"
     verbs:
       - "get"

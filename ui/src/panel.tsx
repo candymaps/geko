@@ -29,35 +29,52 @@ export function Stat({ label, value, hint }: { label: string; value: string; hin
 
 const reading = (v: number) => v.toLocaleString("en", { maximumFractionDigits: v < 10 ? 2 : v < 100 ? 1 : 0 });
 
-/** One value per second, the last one being the current second. */
-export function Spark({ data, unit }: { data: number[]; unit: string }) {
+/** A line of a chart: `tone` is the color of its pod, and none is the total of them. */
+export interface Series {
+  label: string;
+  tone?: number;
+  data: number[];
+}
+
+/** One value per second, the last one being the current second; a line for each series. */
+export function Spark({ series, unit }: { series: Series[]; unit: string }) {
   const [hover, setHover] = useState<number | null>(null);
-  const peak = Math.max(...data);
+  const peak = Math.max(0, ...series.flatMap((s) => s.data));
   const max = peak * 1.1 || 1;
   const w = 300;
   const h = 64;
-  const last = data.length - 1;
-  const points = data.map((v, i) => `${((i / last) * w).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`);
+  const last = Math.max(1, ...series.map((s) => s.data.length)) - 1;
+  const line = (data: number[]) => data.map((v, i) => `${((i / last) * w).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`);
+  const lone = series.length === 1;
   const at = (e: PointerEvent) => {
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setHover(Math.max(0, Math.min(last, Math.round(((e.clientX - box.left) / box.width) * last))));
   };
   const x = hover === null ? 0 : (hover / last) * 100;
   const ago = hover === null ? 0 : last - hover;
+  const cls = (s: Series) => (s.tone === undefined ? "total" : `pod-${s.tone}`);
   return (
     <div class="gc-spark-wrap" onPointerMove={at} onPointerLeave={() => setHover(null)}>
       <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last 60 seconds, peak ${peak.toFixed(1)} ${unit}`}>
-        <polygon points={`0,${h} ${points.join(" ")} ${w},${h}`} class="area" />
-        <polyline points={points.join(" ")} class="line" />
+        {lone && <polygon points={`0,${h} ${line(series[0].data).join(" ")} ${w},${h}`} class="area" />}
+        {series.map((s) => (
+          <polyline key={s.label} points={line(s.data).join(" ")} class={`line ${lone ? "" : cls(s)}`} />
+        ))}
       </svg>
       {hover !== null && (
         <>
           <span class="guide" style={{ left: `${x}%` }} />
-          <span class="dot" style={{ left: `${x}%`, top: `${(1 - data[hover] / max) * 100}%` }} />
+          {series.map((s) => (
+            <span key={s.label} class={`dot ${lone ? "" : cls(s)}`} style={{ left: `${x}%`, top: `${(1 - (s.data[hover] ?? 0) / max) * 100}%` }} />
+          ))}
           <span class={`tip${x > 60 ? " left" : ""}`} style={{ left: `${x}%` }}>
-            <strong>
-              {reading(data[hover])} {unit}
-            </strong>
+            {series.map((s) => (
+              <strong key={s.label} class={lone ? "" : cls(s)}>
+                {!lone && <i />}
+                {!lone && `${s.label} `}
+                {reading(s.data[hover] ?? 0)} {unit}
+              </strong>
+            ))}
             <small>{ago === 0 ? "This second" : `${ago} s ago`}</small>
           </span>
         </>

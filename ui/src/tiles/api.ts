@@ -1,3 +1,5 @@
+import { groupBy, sumWindow, total, worst, worstWindow } from "../pods";
+
 export interface Status {
   ready: boolean;
   bundle: { version: string; created_unix: number } | null;
@@ -37,4 +39,33 @@ export interface Stats {
   styles: { style: string; requests: number }[];
   last_hour: { end_unix: number; requests: number[]; p99_us: (number | null)[] };
   last_minute: { end_unix: number; requests: number[]; p99_us: (number | null)[] };
+}
+
+/** The counters of several pods as one: what is added is added, and a percentile is the worst of the pods (see `worstWindow`). */
+export function combine(list: Stats[]): Stats {
+  const window = (w: (s: Stats) => Stats["last_hour"]): Stats["last_hour"] => {
+    const sum = sumWindow(list.map((s) => w(s)));
+    const slowest = worstWindow(list.map((s) => ({ end_unix: w(s).end_unix, p99: w(s).p99_us })));
+    return { end_unix: sum.end_unix, requests: sum.requests, p99_us: slowest.p99 };
+  };
+  return {
+    since_unix: Math.min(...list.map((s) => s.since_unix)),
+    routes: groupBy(list.flatMap((s) => s.routes), (r) => r.route, (rows) => ({
+      route: rows[0].route,
+      requests: total(rows.map((r) => r.requests)),
+      errors: total(rows.map((r) => r.errors)),
+      p50_us: worst(rows.map((r) => r.p50_us)),
+      p95_us: worst(rows.map((r) => r.p95_us)),
+      p99_us: worst(rows.map((r) => r.p99_us)),
+    })),
+    zooms: groupBy(list.flatMap((s) => s.zooms), (z) => z.zoom, (rows) => ({
+      zoom: rows[0].zoom,
+      tiles: total(rows.map((z) => z.tiles)),
+      empty: total(rows.map((z) => z.empty)),
+      bytes: total(rows.map((z) => z.bytes)),
+    })).sort((a, b) => a.zoom - b.zoom),
+    styles: groupBy(list.flatMap((s) => s.styles), (s) => s.style, (rows) => ({ style: rows[0].style, requests: total(rows.map((s) => s.requests)) })),
+    last_hour: window((s) => s.last_hour),
+    last_minute: window((s) => s.last_minute),
+  };
 }

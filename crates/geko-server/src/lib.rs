@@ -28,7 +28,7 @@ use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Mod
 use serde_json::json;
 
 pub use access::Access;
-pub use dashboard::{ModuleStatus, Statuses, serve as serve_dashboard};
+pub use dashboard::{ModuleStatus, PodAnswer, Pods, Statuses, serve as serve_dashboard};
 
 /// The module behind a mount, which a bundle built by another version of it switches to that
 /// version (`Reopen`); requests in flight finish on the one they started on.

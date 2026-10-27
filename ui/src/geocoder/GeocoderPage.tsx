@@ -1,7 +1,8 @@
 import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { useApi } from "../api";
-import type { Stats, Status } from "./api";
+import { combine, type Stats, type Status } from "./api";
+import { NoPods, PodFilter, podSeries, usePodView } from "../pods";
 import { useTab } from "../hooks";
 import { mock } from "./mock";
 
@@ -156,19 +157,33 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { data: stats, error } = useApi<Stats>("/geocoder/v1/stats", 1_000);
+  const { pods, error, filter, shown, stats } = usePodView<Stats>("geocoder", "geocoder/v1/stats", combine);
   const p = mock.performance;
-  if (!stats) return <Placeholder error={error} module="geocoder" />;
+  if (!pods) return <Placeholder error={error} module="geocoder" />;
+  const filtered = <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />;
+  if (!stats) {
+    return (
+      <>
+        {filtered}
+        <NoPods pods={pods} />
+      </>
+    );
+  }
+  const worstOf = shown.length > 1 ? "; with several pods, the worst of them" : "";
   const lookups = stats.cache.hits + stats.cache.misses;
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
   const total = stats.routes.reduce((t, r) => t + r.requests, 0);
+  const minute = stats.last_minute;
+  const per = (pick: (s: Stats) => (number | null)[]) => (data: Stats) => ({ end_unix: data.last_minute.end_unix, values: pick(data).map((v) => v ?? 0) });
   return (
+    <>
+    {filtered}
     <div class="gc-grid">
       <Card title="Requests per second" aside="Last 60 seconds">
-        <Spark data={stats.last_minute.requests} unit="req/s" />
+        <Spark series={podSeries(shown, per((s) => s.last_minute.requests), minute.end_unix, minute.requests)} unit="req/s" />
       </Card>
-      <Card title="p99 latency (ms)" aside="Last 60 seconds">
-        <Spark data={stats.last_minute.p99_ms.map((v) => v ?? 0)} unit="ms" />
+      <Card title={`p99 latency (ms)`} aside={`Last 60 seconds${worstOf}`}>
+        <Spark series={podSeries(shown, per((s) => s.last_minute.p99_ms), minute.end_unix)} unit="ms" />
       </Card>
       <Card title="Health of the answers" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
@@ -178,7 +193,7 @@ function Performance() {
           <Stat label="Duplicates merged" value={number(stats.merged_duplicates)} hint="each one is a fusion miss" />
         </div>
       </Card>
-      <Card title="Latency by route" wide aside="Upper bound of the bucket each percentile falls in">
+      <Card title="Latency by route" wide aside={`Upper bound of the bucket each percentile falls in${worstOf}`}>
         <table class="gc-table">
           <thead>
             <tr>
@@ -244,6 +259,7 @@ function Performance() {
         </table>
       </Card>
     </div>
+    </>
   );
 }
 

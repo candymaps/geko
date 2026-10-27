@@ -157,7 +157,20 @@ const routes: Record<string, () => unknown> = {
   "/tiles/stats.json": tileStats,
 };
 
+/** Two replicas of a module, each with its own counters: the sample of one, moved a little for the other. */
+function mockPods(module: string, path: string): unknown {
+  const one = mockGet(`/${path}`) as { last_minute: { requests: number[] }; last_hour: { requests: number[] } };
+  const other = structuredClone(one);
+  const scale = (list: number[], by: number) => list.map((v) => Math.round(v * by));
+  other.last_minute.requests = scale(other.last_minute.requests, 0.4);
+  other.last_hour.requests = scale(other.last_hour.requests, 0.4);
+  const pod = (suffix: string, data: unknown) => ({ pod: `geko-${module}-5d9c7b-${suffix}`, ready: true, data, error: null });
+  return [pod("k7x2p", one), pod("q4w8m", other)];
+}
+
 export function mockGet(path: string): unknown {
+  const pods = /^\/admin\/api\/modules\/([^/]+)\/pods\/(.+)$/.exec(path);
+  if (pods) return mockPods(pods[1], pods[2]);
   const answer = routes[path];
   if (!answer) throw new Error(`${path} has no sample data`);
   return answer();

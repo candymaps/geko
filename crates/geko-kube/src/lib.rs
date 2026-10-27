@@ -117,6 +117,14 @@ impl JobState {
     }
 }
 
+/// A pod that serves, as the cluster has it: where it answers and whether it is ready.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct PodState {
+    pub name: String,
+    pub ip: Option<String>,
+    pub ready: bool,
+}
+
 pub struct Cluster {
     client: kube::Client,
     namespace: String,
@@ -188,6 +196,25 @@ impl Cluster {
                 let replicas = d.data["spec"]["replicas"].as_i64().unwrap_or(1);
                 let ready = d.data["status"]["readyReplicas"].as_i64().unwrap_or(0);
                 Some(Deployed { name, image, replicas, ready })
+            })
+            .collect())
+    }
+
+    /// The pods with the label `selector` that a deployment keeps (not those of a job), the oldest
+    /// first (then by name) so that they come in the same order at every look.
+    pub async fn pods(&self, selector: &str) -> Result<Vec<PodState>> {
+        let api: Api<k8s_openapi::api::core::v1::Pod> = Api::namespaced(self.client.clone(), &self.namespace);
+        let mut items = api.list(&ListParams::default().labels(selector)).await.context("cannot list the pods")?.items;
+        items.sort_by(|a, b| (&a.metadata.creation_timestamp, &a.metadata.name).cmp(&(&b.metadata.creation_timestamp, &b.metadata.name)));
+        Ok(items
+            .into_iter()
+            .filter(|p| p.metadata.owner_references.as_ref().is_some_and(|o| o.iter().any(|o| o.kind == "ReplicaSet")))
+            .filter(|p| p.metadata.deletion_timestamp.is_none())
+            .filter_map(|p| {
+                let name = p.metadata.name?;
+                let status = p.status.unwrap_or_default();
+                let ready = status.conditions.is_some_and(|c| c.iter().any(|c| c.type_ == "Ready" && c.status == "True"));
+                Some(PodState { name, ip: status.pod_ip, ready })
             })
             .collect())
     }

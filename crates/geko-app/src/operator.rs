@@ -14,12 +14,12 @@ use std::time::Duration;
 use anyhow::Context;
 use geko_kube::{Cluster, Deployed, JobState, Object};
 use geko_module_sdk::module::ModuleName;
-use geko_server::ModuleStatus;
+use geko_server::{ModuleStatus, PodAnswer};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::config::Config;
-use crate::k8s::{self, CONFIG_MAP, OPERATOR};
+use crate::k8s::{self, CONFIG_MAP, OPERATOR, PORT};
 
 /// What marks the resources of the operator: only these are looked at, and only these are deleted.
 const MANAGED_LABEL: &str = "app.kubernetes.io/managed-by";
@@ -33,6 +33,9 @@ const BUILD_HASH: &str = "geko.candymaps/build";
 const RESYNC: Duration = Duration::from_secs(300);
 /// The look after one that failed.
 const RETRY: Duration = Duration::from_secs(30);
+/// How long the dashboard waits for a pod to answer, and the most it takes from the answer.
+const POD_TIMEOUT: Duration = Duration::from_secs(3);
+const POD_BODY: u64 = 1 << 20;
 
 fn selector() -> String {
     format!("{MANAGED_LABEL}={OPERATOR}")
@@ -43,16 +46,59 @@ fn selector() -> String {
 pub fn run(config: &Config, mut options: k8s::Options, listen: SocketAddr, namespace: Option<String>) -> anyhow::Result<()> {
     options.dashboard = Some(OPERATOR.to_owned());
     tokio::runtime::Runtime::new()?.block_on(async {
-        let cluster = Cluster::connect(namespace).await?;
+        let cluster = Arc::new(Cluster::connect(namespace).await?);
         tracing::info!(namespace = cluster.namespace(), "operating");
         let known: Arc<RwLock<Vec<ModuleStatus>>> = Arc::default();
         let shown = Arc::clone(&known);
         let statuses: geko_server::Statuses = Arc::new(move || shown.read().map(|s| s.clone()).unwrap_or_default());
+        let asker = Arc::clone(&cluster);
+        let pods: geko_server::Pods = Arc::new(move |module, path| {
+            let cluster = Arc::clone(&asker);
+            Box::pin(async move { answers(&cluster, &module, &path).await })
+        });
         tokio::select! {
-            served = geko_server::serve_dashboard(listen, crate::access(config), statuses) => served.context("the dashboard failed"),
+            served = geko_server::serve_dashboard(listen, crate::access(config), statuses, pods) => served.context("the dashboard failed"),
             kept = keep(&cluster, &options, &known) => kept,
         }
     })
+}
+
+/// What each pod that serves `module` answers to a GET of `path`, in the order of `Cluster::pods`.
+/// They are asked at once, and one that does not answer in time says so: it does not hold back the
+/// others. A pod that is not ready is not asked.
+async fn answers(cluster: &Cluster, module: &str, path: &str) -> Vec<PodAnswer> {
+    let pods = match cluster.pods(&format!("app.kubernetes.io/name=geko,app.kubernetes.io/component={module}")).await {
+        Ok(pods) => pods,
+        Err(e) => {
+            tracing::warn!(error = format!("{e:#}"), module, "cannot list the pods");
+            return Vec::new();
+        }
+    };
+    let asked: Vec<_> = pods
+        .into_iter()
+        .map(|pod| {
+            let url = pod.ip.as_ref().map(|ip| format!("http://{ip}:{PORT}/{path}"));
+            tokio::spawn(async move {
+                let body = match (url, pod.ready) {
+                    (Some(url), true) => match tokio::task::spawn_blocking(move || geko_fetch::get_text(&url, POD_TIMEOUT, POD_BODY)).await {
+                        Ok(Ok(text)) => serde_json::from_str(&text).map_err(|e| format!("the answer is not JSON: {e}")),
+                        Ok(Err(e)) => Err(e.to_string()),
+                        Err(e) => Err(e.to_string()),
+                    },
+                    (_, false) => Err("not ready".to_owned()),
+                    (None, true) => Err("no address yet".to_owned()),
+                };
+                PodAnswer { pod: pod.name, ready: pod.ready, body }
+            })
+        })
+        .collect();
+    let mut answers = Vec::with_capacity(asked.len());
+    for handle in asked {
+        if let Ok(answer) = handle.await {
+            answers.push(answer);
+        }
+    }
+    answers
 }
 
 async fn keep(cluster: &Cluster, options: &k8s::Options, known: &RwLock<Vec<ModuleStatus>>) -> anyhow::Result<()> {

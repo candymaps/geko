@@ -15,6 +15,13 @@
   /* The primary as text or icon on the page background, darker to keep its contrast. */
   --primary-ink: #5f7d12;
   --soft: rgb(164 204 71 / 0.2);
+  /* One color for each replica of a module, in the order they started; the total is the ink. */
+  --pod-0: #2f6fdb;
+  --pod-1: #d9482b;
+  --pod-2: #8a4fd1;
+  --pod-3: #d28a00;
+  --pod-4: #0f9d8a;
+  --pod-5: #c2368c;
   font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -32,6 +39,12 @@
     --content: #0a141e;
     --primary-ink: #a4cc47;
     --soft: rgb(164 204 71 / 0.18);
+    --pod-0: #6aa3ff;
+    --pod-1: #ff7a5c;
+    --pod-2: #b98cff;
+    --pod-3: #ffb938;
+    --pod-4: #3ddcc4;
+    --pod-5: #ff7fc4;
   }
 }
 * {
@@ -619,6 +632,72 @@ main {
 .gc-spark .area {
   fill: var(--soft);
 }
+.gc-spark .line.total {
+  stroke: var(--fg);
+  stroke-dasharray: 4 3;
+}
+.gc-spark-wrap .dot.total,
+.gc-spark-wrap .tip .total i {
+  background: var(--fg);
+}
+.gc-spark-wrap .tip strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gc-spark-wrap .tip strong i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.gc-spark .line.pod-0 {
+  stroke: var(--pod-0);
+}
+.gc-spark-wrap .dot.pod-0,
+.gc-spark-wrap .tip .pod-0 i,
+.gc-pod.pod-0 i {
+  background: var(--pod-0);
+}
+.gc-spark .line.pod-1 {
+  stroke: var(--pod-1);
+}
+.gc-spark-wrap .dot.pod-1,
+.gc-spark-wrap .tip .pod-1 i,
+.gc-pod.pod-1 i {
+  background: var(--pod-1);
+}
+.gc-spark .line.pod-2 {
+  stroke: var(--pod-2);
+}
+.gc-spark-wrap .dot.pod-2,
+.gc-spark-wrap .tip .pod-2 i,
+.gc-pod.pod-2 i {
+  background: var(--pod-2);
+}
+.gc-spark .line.pod-3 {
+  stroke: var(--pod-3);
+}
+.gc-spark-wrap .dot.pod-3,
+.gc-spark-wrap .tip .pod-3 i,
+.gc-pod.pod-3 i {
+  background: var(--pod-3);
+}
+.gc-spark .line.pod-4 {
+  stroke: var(--pod-4);
+}
+.gc-spark-wrap .dot.pod-4,
+.gc-spark-wrap .tip .pod-4 i,
+.gc-pod.pod-4 i {
+  background: var(--pod-4);
+}
+.gc-spark .line.pod-5 {
+  stroke: var(--pod-5);
+}
+.gc-spark-wrap .dot.pod-5,
+.gc-spark-wrap .tip .pod-5 i,
+.gc-pod.pod-5 i {
+  background: var(--pod-5);
+}
 .gc-spark-wrap {
   position: relative;
   cursor: crosshair;
@@ -944,4 +1023,58 @@ main {
   .gc-tabs .bar.slide {
     transition: none;
   }
+}
+
+/* The pods a view shows, above its panels. */
+.gc-pods {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.gc-pod {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gc-pod i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.gc-pod small {
+  color: var(--muted);
+}
+.gc-pod:hover {
+  background: var(--hover);
+}
+.gc-pod.off {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.gc-pod.off i,
+.gc-pod.dead i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.gc-pod.dead {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+.gc-pods-all {
+  border: 0;
+  background: none;
+  color: var(--primary-ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
