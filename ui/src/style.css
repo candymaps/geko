@@ -821,8 +821,24 @@ main {
   font: inherit;
   font-weight: 600;
 }
+.gc-query button {
+  cursor: pointer;
+}
 .gc-query button:disabled {
+  cursor: not-allowed;
   opacity: 0.6;
+}
+.gc-query .gc-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.gc-query .gc-check input {
+  flex: none;
+  padding: 0;
 }
 .gc-meter {
   display: inline-block;

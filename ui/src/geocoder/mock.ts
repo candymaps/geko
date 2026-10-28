@@ -19,14 +19,6 @@ export interface Source {
   options: Record<string, string>;
 }
 
-export interface Reading {
-  text: string;
-  kind: string;
-  score: number;
-  ms: number;
-  winner: boolean;
-}
-
 export interface Hit {
   label: string;
   layer: string;
@@ -38,14 +30,7 @@ import type { Setting } from "../panel";
 
 export const mock = {
   debug: {
-    query: "gran via 1, madrid",
-    parsed: "street “gran via” · number 1 · locality “madrid”",
     ms: 2.3,
-    readings: [
-      { text: "gran vía 1, Madrid", kind: "address", score: 0.96, ms: 0.8, winner: true },
-      { text: "gran vía, Madrid (street)", kind: "street", score: 0.71, ms: 0.5, winner: false },
-      { text: "Gran Vía 1, Bilbao", kind: "address", score: 0.44, ms: 0.6, winner: false },
-    ] as Reading[],
     hits: [
       { label: "Gran Vía, 1, 28013 Madrid", layer: "address", confidence: 0.98, source: "CartoCiudad + OSM" },
       { label: "Gran Vía, Madrid", layer: "street", confidence: 0.74, source: "OSM" },

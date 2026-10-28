@@ -1,9 +1,11 @@
 import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
 import { Bars, BuildSteps, Card, number, Placeholder, SettingsCard, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
+import { useState } from "preact/hooks";
 import { useApi } from "../api";
 import { combine, type Stats, type Status } from "./api";
 import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, useRange } from "../pods";
 import { useTab } from "../hooks";
+import { useSource, type Mode } from "../source";
 import { mock } from "./mock";
 
 const TABS: Tab[] = [
@@ -272,61 +274,143 @@ function Performance() {
   );
 }
 
+interface Reading {
+  probability: number;
+  reading: { type: string; [field: string]: unknown };
+  tried_us: number | null;
+}
+
+interface Reply {
+  ms: number;
+  countries: { country: string; readings: Reading[] }[];
+  hits: { gid: string; label: string; layer: string; sources: string[]; match_type: string; confidence: number; score: number | null }[];
+}
+
+/** The query as any client sends it, with `debug=true` so that each result brings its score; in mock mode, the sample. */
+async function ask(text: string, autocomplete: boolean, mode: Mode): Promise<Reply> {
+  if (mode === "mock") {
+    const d = mock.debug;
+    return { ms: d.ms, countries: [], hits: d.hits.map((h) => ({ gid: h.label, label: h.label, layer: h.layer, sources: [h.source], match_type: "exact", confidence: h.confidence, score: null })) };
+  }
+  const params = new URLSearchParams({ text, size: "10", debug: "true" });
+  const res = await fetch(`/geocoder/v1/${autocomplete ? "autocomplete" : "search"}?${params}`);
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error ?? `the geocoder answered ${res.status}`);
+  return {
+    ms: body.geocoding.timing_us / 1000,
+    countries: body.geocoding.debug ?? [],
+    hits: body.features.map((f: { properties: Omit<Reply["hits"][number], "sources"> & { sources?: string[] } }) => ({ ...f.properties, sources: f.properties.sources ?? [], score: f.properties.score ?? null })),
+  };
+}
+
+/** A reading as a line: what the parser took each part of the query for. */
+function describe(r: Reading["reading"]): string {
+  const part = (label: string, v: unknown) => (typeof v === "string" && v ? `${label} “${v}”` : null);
+  const parts =
+    r.type === "address"
+      ? [part("street", r.street), part("number", r.housenumber), part("postcode", r.postcode), part("locality", r.locality)]
+      : r.type === "place"
+        ? [part("place", r.text), part("within", r.within)]
+        : r.type === "postcode"
+          ? [part("postcode", r.postcode)]
+          : [`coordinates ${r.lat}, ${r.lon}`];
+  return [r.type === "address" ? "Address" : r.type === "place" ? "Place" : r.type === "postcode" ? "Postcode" : "Point", ...parts.filter(Boolean)].join(" · ");
+}
+
 function Debugger() {
-  const d = mock.debug;
+  const { mode } = useSource();
+  const [text, setText] = useState("");
+  const [autocomplete, setAutocomplete] = useState(false);
+  const [state, setState] = useState<{ reply: Reply | null; error: string | null; busy: boolean }>({ reply: null, error: null, busy: false });
+  const run = async (e: Event) => {
+    e.preventDefault();
+    const query = text.trim();
+    if (!query) return;
+    setState((s) => ({ ...s, busy: true }));
+    try {
+      setState({ reply: await ask(query, autocomplete, mode), error: null, busy: false });
+    } catch (err) {
+      setState({ reply: null, error: (err as Error).message, busy: false });
+    }
+  };
+  const { reply, error, busy } = state;
   return (
     <div class="gc-grid">
-      <Card title="Query" wide aside={`${d.ms} ms`}>
-        <div class="gc-query">
-          <input value={d.query} readOnly aria-label="Query" />
-          <button disabled>
+      <Card title="Query" wide aside={reply ? `${reply.ms.toFixed(1)} ms` : undefined}>
+        <form class="gc-query" onSubmit={run}>
+          <input value={text} onInput={(e) => setText(e.currentTarget.value)} placeholder="gran via 1, palma" aria-label="Query" />
+          <label class="gc-check">
+            <input type="checkbox" checked={autocomplete} onChange={(e) => setAutocomplete(e.currentTarget.checked)} /> Autocomplete
+          </label>
+          <button type="submit" disabled={busy || !text.trim()}>
             <Zap size={14} /> Run
           </button>
-        </div>
-        <p class="gc-scope">Understood as {d.parsed}</p>
+        </form>
+        <p class="gc-scope">Asked like any client does, so it is counted in the statistics.</p>
+        {error && <p class="error">{error}</p>}
       </Card>
-      <Card title="Readings tried" wide>
-        <table class="gc-table">
-          <thead>
-            <tr>
-              <th>Reading</th>
-              <th>Kind</th>
-              <th class="num">Score</th>
-              <th class="num">Time</th>
-            </tr>
-          </thead>
-          <tbody>
-            {d.readings.map((r) => (
-              <tr key={r.text} class={r.winner ? "win" : undefined}>
-                <td>
-                  {r.text} {r.winner && <span class="gc-pill ok">Chosen</span>}
-                </td>
-                <td>{r.kind}</td>
-                <td class="num">{r.score.toFixed(2)}</td>
-                <td class="num">{r.ms} ms</td>
+      {reply && reply.countries.length > 0 && (
+        <Card title="How it was read" wide aside="Likeliest reading first">
+          <table class="gc-table">
+            <thead>
+              <tr>
+                <th>Reading</th>
+                <th>Country</th>
+                <th class="num">Probability</th>
+                <th class="num">Time</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
-      <Card title="Results" wide>
-        <table class="gc-table">
-          <tbody>
-            {d.hits.map((h) => (
-              <tr key={h.label}>
-                <td>{h.label}</td>
-                <td>{h.layer}</td>
-                <td class="muted">{h.source}</td>
-                <td class="num">
-                  <span class="gc-meter">
-                    <i style={{ width: `${h.confidence * 100}%` }} />
-                  </span>
-                  {h.confidence.toFixed(2)}
-                </td>
+            </thead>
+            <tbody>
+              {reply.countries.flatMap((c) =>
+                c.readings.map((r, i) => (
+                  <tr key={`${c.country} ${i}`} class={r.tried_us === null ? "muted" : undefined}>
+                    <td>{describe(r.reading)}</td>
+                    <td>{c.country}</td>
+                    <td class="num">{percent(r.probability, 1)}</td>
+                    <td class="num">{r.tried_us === null ? "skipped" : `${(r.tried_us / 1000).toFixed(2)} ms`}</td>
+                  </tr>
+                )),
+              )}
+            </tbody>
+          </table>
+        </Card>
+      )}
+      <Card title="Results" wide aside={reply ? `${reply.hits.length} found` : undefined}>
+        {!reply ? (
+          <p class="muted">Run a query to see what the geocoder answers.</p>
+        ) : reply.hits.length === 0 ? (
+          <p class="muted">No result.</p>
+        ) : (
+          <table class="gc-table">
+            <thead>
+              <tr>
+                <th>Result</th>
+                <th>Layer</th>
+                <th>Match</th>
+                <th>Sources</th>
+                <th class="num">Score</th>
+                <th class="num">Confidence</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {reply.hits.map((h) => (
+                <tr key={h.gid}>
+                  <td>{h.label}</td>
+                  <td>{h.layer}</td>
+                  <td>{h.match_type}</td>
+                  <td class="muted">{h.sources.join(" + ") || "—"}</td>
+                  <td class="num">{h.score === null ? "—" : h.score.toFixed(2)}</td>
+                  <td class="num">
+                    <span class="gc-meter">
+                      <i style={{ width: `${h.confidence * 100}%` }} />
+                    </span>
+                    {h.confidence.toFixed(2)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
     </div>
   );
