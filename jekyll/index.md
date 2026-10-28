@@ -19,11 +19,17 @@ Each module lives in its own repository:
 
 ## Where to go
 
+- [Architecture]({% link architecture.md %}): the host, the modules and how they fit.
 - [Installation and usage]({% link installation.md %}): run geko with Docker in two commands.
 - [Configuration]({% link configuration.md %}): every option of `geko.toml`.
 - [CLI]({% link cli.md %}): the commands of the `geko` binary.
 - [Modules]({% link modules.md %}): how the host loads a module, with a page for the
-  [geocoder]({% link geocoder.md %}) and for [tiles]({% link tiles.md %}).
+  [geocoder]({% link geocoder.md %}) and for [tiles]({% link tiles.md %}), and how to
+  [write one]({% link writing-a-module.md %}).
+- [Kubernetes]({% link kubernetes.md %}): one deployment per module.
+- [Dashboard]({% link dashboard.md %}): the map, the status and the performance of every module.
+- [Data and bundles]({% link data-and-bundles.md %}): downloads, incremental builds and bundles.
+- [Security and licenses]({% link security.md %}): signed code, API keys, and the licenses of code and data.
 
 The specification of the host is in
 [PROJECT.md](https://github.com/candymaps/geko/blob/main/docs/PROJECT.md), and the contract with

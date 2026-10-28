@@ -1,6 +1,6 @@
 ---
 title: Installation and usage
-nav_order: 2
+nav_order: 3
 ---
 
 # Installation and usage

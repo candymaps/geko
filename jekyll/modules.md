@@ -1,6 +1,6 @@
 ---
 title: Modules
-nav_order: 5
+nav_order: 6
 has_children: true
 ---
 
@@ -14,6 +14,8 @@ The modules available:
 
 - [Geocoder]({% link geocoder.md %}): addresses and places into coordinates, and back.
 - [Tiles]({% link tiles.md %}): vector tiles of the scope, with styles, fonts and sprites.
+
+To write a new one, see [Writing a module]({% link writing-a-module.md %}).
 
 ## Download and loading
 
