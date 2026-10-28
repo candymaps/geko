@@ -88,13 +88,6 @@ export const mock = {
       { route: "/v1/place/{id}", rps: 2.1, p50: 0.1, p95: 0.2, p99: 0.4, errors: 0 },
       { route: "/v1/batch", rps: 0.6, p50: 8.4, p95: 22.0, p99: 41.0, errors: 0.5 },
     ] as Latency[],
-    confidence: [2, 3, 4, 6, 8, 11, 15, 21, 34, 62],
-    layers: [
-      { name: "address", share: 58 },
-      { name: "street", share: 21 },
-      { name: "venue", share: 14 },
-      { name: "locality", share: 7 },
-    ],
     slow: [
       { text: "calle mayor", ms: 14.8, note: "420 candidate streets" },
       { text: "c/ san jose 12 3º b valencia", ms: 11.2, note: "4 readings" },

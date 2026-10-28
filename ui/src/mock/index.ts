@@ -57,6 +57,13 @@ const stats = (): Stats => ({
   cut_short: 221,
   merged_duplicates: 0,
   cache: { enabled: true, hits: 33_100, misses: 21_984 },
+  confidence: [200, 300, 400, 600, 800, 1_100, 1_500, 2_100, 3_400, 6_200],
+  layers: [
+    { layer: "address", count: 6_400 },
+    { layer: "street", count: 2_300 },
+    { layer: "poi", count: 1_500 },
+    { layer: "locality", count: 800 },
+  ],
   last_hour: {
     end_unix: now(),
     requests: Array.from({ length: 60 }, (_, i) => Math.round(900 + Math.sin(i / 5) * 260 + Math.random() * 120)),

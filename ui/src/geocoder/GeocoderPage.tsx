@@ -1,5 +1,5 @@
 import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
-import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
+import { Bars, Card, number, Placeholder, SettingsCard, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { useApi } from "../api";
 import { combine, type Stats, type Status } from "./api";
 import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, useRange } from "../pods";
@@ -23,7 +23,10 @@ const region = (() => {
     return (code: string) => code;
   }
 })();
-const bytes = (n: number) => size(n / 1048576);
+const bytes = (n: number) => {
+  const mb = n / 1048576;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb.toFixed(1)} MB`;
+};
 const ms = (v: number | null) => (v === null ? "—" : `${v} ms`);
 const percent = (part: number, whole: number) => (whole === 0 ? "—" : `${((part / whole) * 100).toFixed(1)} %`);
 
@@ -175,6 +178,8 @@ function Performance() {
       </>
     );
   }
+  const firstResults = stats.confidence.reduce((t, n) => t + n, 0);
+  const layerRows = [...stats.layers].sort((a, b) => b.count - a.count).map((l) => ({ name: l.layer, share: Math.round((l.count / Math.max(1, firstResults)) * 1000) / 10 }));
   const worstOf = shown.length > 1 ? "; with several pods, the worst of them" : "";
   const lookups = stats.cache.hits + stats.cache.misses;
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
@@ -241,10 +246,10 @@ function Performance() {
           </tbody>
         </table>
       </Card>
-      <Card title="Confidence of the first result" aside={<Sample />}>
+      <Card title="Confidence of the first result" aside="Text searches and autocompletes">
         <div class="gc-hist" role="img" aria-label="Distribution of confidence, from 0 to 1">
-          {p.confidence.map((v, i) => (
-            <div key={i} class="col" style={{ height: `${v}%` }} title={`${i / 10}–${(i + 1) / 10}: ${v} %`} />
+          {stats.confidence.map((v, i) => (
+            <div key={i} class="col" style={{ height: `${(v / Math.max(1, ...stats.confidence)) * 100}%` }} title={`${i / 10}–${(i + 1) / 10}: ${percent(v, firstResults)}`} />
           ))}
         </div>
         <div class="gc-axis">
@@ -253,8 +258,8 @@ function Performance() {
           <span>1</span>
         </div>
       </Card>
-      <Card title="Layer of the first result" aside={<Sample />}>
-        <Bars rows={p.layers} />
+      <Card title="Layer of the first result" aside="Text searches and autocompletes">
+        {firstResults === 0 ? <p class="muted">Nothing has been asked yet.</p> : <Bars rows={layerRows} />}
       </Card>
       <Card title="Slowest queries" wide aside={<Sample />}>
         <table class="gc-table">

@@ -26,6 +26,9 @@ export interface Stats {
   cut_short: number;
   merged_duplicates: number;
   cache: { enabled: boolean; hits: number; misses: number };
+  /** The first result of each text search, by tenths of confidence, and by layer. */
+  confidence: number[];
+  layers: { layer: string; count: number }[];
   last_hour: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
   last_minute: { end_unix: number; requests: number[]; p99_ms: (number | null)[] };
 }
@@ -52,6 +55,8 @@ export function combine(list: Stats[]): Stats {
     empty: total(list.map((s) => s.empty)),
     cut_short: total(list.map((s) => s.cut_short)),
     merged_duplicates: total(list.map((s) => s.merged_duplicates)),
+    confidence: Array.from({ length: 10 }, (_, i) => total(list.map((s) => s.confidence?.[i] ?? 0))),
+    layers: groupBy(list.flatMap((s) => s.layers ?? []), (l) => l.layer, (rows) => ({ layer: rows[0].layer, count: total(rows.map((r) => r.count)) })),
     cache: { enabled: list.some((s) => s.cache.enabled), hits: total(list.map((s) => s.cache.hits)), misses: total(list.map((s) => s.cache.misses)) },
     last_hour: window((s) => s.last_hour, 60),
     last_minute: window((s) => s.last_minute, 1),
