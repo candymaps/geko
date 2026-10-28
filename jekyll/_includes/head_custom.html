@@ -50,6 +50,15 @@
     input.focus();
     input.select();
   });
+  // aux_links_new_tab applies to every link: only the external ones keep it.
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".aux-nav a").forEach(function (link) {
+      if (link.origin === location.origin) {
+        link.removeAttribute("target");
+        link.removeAttribute("rel");
+      }
+    });
+  });
   // The tooltip of the icon links, on the whole button, below it, fading in and out.
   document.addEventListener("DOMContentLoaded", function () {
     if (!window.tippy) return;
