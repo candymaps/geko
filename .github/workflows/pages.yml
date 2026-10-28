@@ -1,0 +1,43 @@
+# The documentation site (jekyll/, Just the Docs): built and published to GitHub Pages on every push
+# to main that touches it. It needs Pages set to "GitHub Actions" as its source in the settings of
+# the repository. Not in a fork.
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - jekyll/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  # A deployment cut halfway would leave the site half published.
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.repository == 'candymaps/geko'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./jekyll
+          destination: ./_site
+      - uses: actions/upload-pages-artifact@v3
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
