@@ -2,6 +2,11 @@
   .search-input-wrap {
     border-right: 1px solid #eeebee;
   }
+  .aux-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    fill: currentColor;
+  }
   .search-input-wrap::after {
     content: "Ctrl K";
     position: absolute;
@@ -34,5 +39,12 @@
     e.preventDefault();
     input.focus();
     input.select();
+  });
+  // On keyup, so that the theme clears the field first (it does that on Esc).
+  document.addEventListener("DOMContentLoaded", function () {
+    var input = document.getElementById("search-input");
+    if (input) input.addEventListener("keyup", function (e) {
+      if (e.key === "Escape") input.blur();
+    });
   });
 </script>
