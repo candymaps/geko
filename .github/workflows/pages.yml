@@ -8,6 +8,7 @@ on:
     branches: [main]
     paths:
       - jekyll/**
+      - openapi.yaml
       - .github/workflows/pages.yml
   workflow_dispatch:
 
@@ -22,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The page of Redoc (jekyll/api/) reads the specification of the host from beside it.
+      - run: cp openapi.yaml jekyll/api/openapi.yaml
       - uses: actions/configure-pages@v5
       - uses: actions/jekyll-build-pages@v1
         with:
