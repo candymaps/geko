@@ -17,7 +17,7 @@ range=("$base" ${2:+"$2"})
 deploy=0
 while IFS= read -r file; do
     case $file in
-        *.md | docs/* | LICENSE | develop/* | Dockerfile | .dockerignore | .github/* | Makefile | make.cmd | ci/affected.sh) ;;
+        *.md | docs/* | jekyll/* | LICENSE | develop/* | Dockerfile | .dockerignore | .github/* | Makefile | make.cmd | ci/affected.sh) ;;
         deploy/* | ci/deploy.sh) deploy=1 ;;
         *) echo "--variant code,contracts,deploy"; exit 0 ;;
     esac
