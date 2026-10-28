@@ -1,6 +1,7 @@
 ---
 title: Modules
-nav_order: 2
+nav_order: 5
+has_children: true
 ---
 
 # Modules
@@ -8,6 +9,11 @@ nav_order: 2
 The host knows a module only through the contract of `geko-module-sdk` (the `Module` trait): it
 never depends on one. Each module serves its routes under `/<module>/`, reads its own
 `geko-<module>.toml` and builds its own part of the bundle.
+
+The modules available:
+
+- [Geocoder]({% link geocoder.md %}): addresses and places into coordinates, and back.
+- [Tiles]({% link tiles.md %}): vector tiles of the scope, with styles, fonts and sprites.
 
 ## Download and loading
 
@@ -29,5 +35,5 @@ a download.
 
 ## Options
 
-Every option of a module is documented in its own repository, not in `geko.toml` or in the README
-of the host.
+Every option of a module is documented in its own page and repository, not in `geko.toml` or in the
+README of the host.
