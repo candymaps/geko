@@ -1,5 +1,5 @@
 import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from "lucide-preact";
-import { Bars, Card, number, Placeholder, SettingsCard, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
+import { Bars, BuildSteps, Card, number, Placeholder, SettingsCard, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { useApi } from "../api";
 import { combine, type Stats, type Status } from "./api";
 import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, useRange } from "../pods";
@@ -30,13 +30,9 @@ const bytes = (n: number) => {
 const ms = (v: number | null) => (v === null ? "—" : `${v} ms`);
 const percent = (part: number, whole: number) => (whole === 0 ? "—" : `${((part / whole) * 100).toFixed(1)} %`);
 
-function Sample() {
-  return <span class="gc-pill off">Sample data</span>;
-}
-
 function Overview({ status, version }: { status: Status; version?: string }) {
-  const i = mock.index;
-  const totals = i.countries.reduce((t, c) => ({ a: t.a + c.addresses, s: t.s + c.streets, p: t.p + c.pois, l: t.l + c.places }), { a: 0, s: 0, p: 0, l: 0 });
+  const entities = Object.values(status.entities ?? {});
+  const totals = entities.reduce((t, c) => ({ a: t.a + c.addresses, s: t.s + c.streets, p: t.p + c.pois, l: t.l + c.places }), { a: 0, s: 0, p: 0, l: 0 });
   const countries = status.countries ?? [];
   const disk = countries.reduce((t, c) => t + c.bytes, 0);
   return (
@@ -85,24 +81,16 @@ function Overview({ status, version }: { status: Status; version?: string }) {
           </tbody>
         </table>
       </Card>
-      <Card title="Entities" wide aside={<Sample />}>
+      <Card title="Entities" wide aside="What fusion left in the bundle">
         <div class="gc-stats four">
-          <Stat label="Addresses" value={number(totals.a)} />
-          <Stat label="Streets" value={number(totals.s)} />
-          <Stat label="POIs" value={number(totals.p)} />
-          <Stat label="Places" value={number(totals.l)} />
+          <Stat label="Addresses" value={entities.length ? number(totals.a) : "—"} />
+          <Stat label="Streets" value={entities.length ? number(totals.s) : "—"} />
+          <Stat label="POIs" value={entities.length ? number(totals.p) : "—"} />
+          <Stat label="Places" value={entities.length ? number(totals.l) : "—"} />
         </div>
       </Card>
-      <Card title="Last build" wide aside={<Sample />}>
-        <ol class="gc-steps">
-          {mock.pipeline.map((s) => (
-            <li key={s.stage} class={s.state}>
-              <strong>{s.stage}</strong>
-              <span>{s.note}</span>
-              <small>{s.took}</small>
-            </li>
-          ))}
-        </ol>
+      <Card title="Last build" wide aside={status.last_build ? stamp(status.last_build.finished_unix) : undefined}>
+        <BuildSteps build={status.last_build} />
       </Card>
     </div>
   );
@@ -162,7 +150,6 @@ function Sources({ status }: { status: Status }) {
 function Performance() {
   const { range, pick: pickRange } = useRange();
   const { pods, error, filter, shown, accent, stats } = usePodView<Stats>("geocoder", "geocoder/v1/stats", combine, range.every);
-  const p = mock.performance;
   if (!pods) return <Placeholder error={error} module="geocoder" />;
   const filtered = (
     <div class="gc-bar">
@@ -261,18 +248,24 @@ function Performance() {
       <Card title="Layer of the first result" aside="Text searches and autocompletes">
         {firstResults === 0 ? <p class="muted">Nothing has been asked yet.</p> : <Bars rows={layerRows} />}
       </Card>
-      <Card title="Slowest queries" wide aside={<Sample />}>
-        <table class="gc-table">
-          <tbody>
-            {p.slow.map((q) => (
-              <tr key={q.text}>
-                <td>{q.text}</td>
-                <td class="muted">{q.note}</td>
-                <td class="num">{q.ms} ms</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <Card title="Slowest queries" wide aside="Last hour, digits and links removed">
+        {stats.slow_queries === null ? (
+          <p class="muted">Off. Set serve.slow_queries in geko-geocoder.toml to list the slowest queries, anonymized and kept in memory only.</p>
+        ) : stats.slow_queries.length === 0 ? (
+          <p class="muted">Nothing has been asked yet.</p>
+        ) : (
+          <table class="gc-table">
+            <tbody>
+              {stats.slow_queries.map((q) => (
+                <tr key={`${q.route} ${q.text}`}>
+                  <td>{q.text}</td>
+                  <td class="muted">{q.route}</td>
+                  <td class="num">{q.ms} ms</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
     </div>
     </>

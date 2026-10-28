@@ -16,6 +16,19 @@ const status = (): Status => ({
     { code: "ES", bytes: 2_076_000_000 },
     { code: "PT", bytes: 214_000_000 },
   ],
+  entities: {
+    ES: { streets: 612_408, addresses: 11_840_221, places: 68_190, pois: 1_204_377, postcodes: 11_000 },
+    PT: { streets: 188_220, addresses: 3_214_905, places: 21_330, pois: 311_042, postcodes: 4_800 },
+  },
+  last_build: {
+    finished_unix: now() - 7200,
+    stages: [
+      { stage: "fetch and stage", elapsed_ms: 240_000, peak_mb: 2_100, reused: false },
+      { stage: "fuse ES", elapsed_ms: 840_000, peak_mb: 5_400, reused: false },
+      { stage: "index ES", elapsed_ms: 660_000, peak_mb: 3_900, reused: false },
+      { stage: "reverse ES", elapsed_ms: 12_000, peak_mb: 800, reused: true },
+    ],
+  },
   sources: [
     { id: "osm", name: "ODbL 1.0", attribution: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright" },
     { id: "overture", name: "CDLA-Permissive-2.0", attribution: "© Overture Maps Foundation, places", url: null },
@@ -57,6 +70,11 @@ const stats = (): Stats => ({
   cut_short: 221,
   merged_duplicates: 0,
   cache: { enabled: true, hits: 33_100, misses: 21_984 },
+  slow_queries: [
+    { text: "calle mayor", route: "search", ms: 14.8, at_unix: now() - 600 },
+    { text: "c/ san jose # #º b valencia", route: "autocomplete", ms: 11.2, at_unix: now() - 1200 },
+    { text: "avenida de la constitucion", route: "search", ms: 9.7, at_unix: now() - 2400 },
+  ],
   confidence: [200, 300, 400, 600, 800, 1_100, 1_500, 2_100, 3_400, 6_200],
   layers: [
     { layer: "address", count: 6_400 },
@@ -93,6 +111,15 @@ const tileStatus = (): TileStatus => ({
     bounds: [-18.2, 27.6, 4.4, 43.9],
     center: [-6.9, 35.75, 6],
     layers: ["earth", "water", "landuse", "natural", "roads", "buildings", "places", "pois", "boundaries", "transit"],
+  },
+  last_build: {
+    finished_unix: now() - 7200,
+    stages: [
+      { stage: "fetch and stage", elapsed_ms: 240_000, peak_mb: 2_100, reused: false },
+      { stage: "fuse ES", elapsed_ms: 840_000, peak_mb: 5_400, reused: false },
+      { stage: "index ES", elapsed_ms: 660_000, peak_mb: 3_900, reused: false },
+      { stage: "reverse ES", elapsed_ms: 12_000, peak_mb: 800, reused: true },
+    ],
   },
   styles: { flavors: ["light", "dark", "white", "grayscale", "black"], languages: 41, fonts: ["Noto Sans Regular", "Noto Sans Medium", "Noto Sans Italic"], sprites: 5 },
   sources: [

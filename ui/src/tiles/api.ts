@@ -1,7 +1,10 @@
 import { groupBy, sumWindow, total, worst, worstWindow } from "../pods";
 
+import type { LastBuild } from "../panel";
+
 export interface Status {
   ready: boolean;
+  last_build?: LastBuild | null;
   bundle: { version: string; created_unix: number } | null;
   tiles: {
     count: number;

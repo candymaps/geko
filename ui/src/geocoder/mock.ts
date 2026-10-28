@@ -19,15 +19,6 @@ export interface Source {
   options: Record<string, string>;
 }
 
-export interface Latency {
-  route: string;
-  rps: number;
-  p50: number;
-  p95: number;
-  p99: number;
-  errors: number;
-}
-
 export interface Reading {
   text: string;
   kind: string;
@@ -45,55 +36,7 @@ export interface Hit {
 
 import type { Setting } from "../panel";
 
-const wave = (n: number, base: number, amp: number, seed: number) =>
-  Array.from({ length: n }, (_, i) => Math.max(0, base + Math.sin(i / 4 + seed) * amp + Math.sin(i * 1.7 + seed * 3) * amp * 0.35));
-
 export const mock = {
-  index: {
-    bundle: "2026.10.26-3f9a1c2",
-    built: "2026-10-26 04:12 UTC",
-    buildTime: "38 min",
-    nextBuild: "in 6 days",
-    ramHotMb: 412,
-    mappedMb: 1630,
-    diskMb: 2184,
-    countries: [
-      { code: "ES", name: "Spain", addresses: 11_840_221, streets: 612_408, pois: 1_204_377, places: 68_190, sizeMb: 1980 },
-      { code: "PT", name: "Portugal", addresses: 3_214_905, streets: 188_220, pois: 311_042, places: 21_330, sizeMb: 204 },
-    ] as Country[],
-  },
-  sources: [
-    { name: "OpenStreetMap", scope: "All countries", enabled: true, release: "Geofabrik 2026-10-25", fetched: "2026-10-26", license: "ODbL 1.0", records: 9_902_114, options: { mirror: "auto" } },
-    { name: "Overture Maps Places", scope: "POIs, all countries", enabled: true, release: "2026-09-23.1", fetched: "2026-10-26", license: "CDLA-Permissive-2.0", records: 1_498_730, options: { min_confidence: "0.8" } },
-    { name: "CartoCiudad", scope: "Spain, addresses", enabled: true, release: "2026-10", fetched: "2026-10-24", license: "CC BY 4.0", records: 8_104_551, options: {} },
-  ] as Source[],
-  pipeline: [
-    { stage: "Download", state: "done", note: "3 sources, cached", took: "4 min" },
-    { stage: "Staging", state: "done", note: "Parquet per source", took: "9 min" },
-    { stage: "Merge", state: "done", note: "−3.1 % duplicates", took: "14 min" },
-    { stage: "Index", state: "done", note: "2 countries", took: "11 min" },
-  ],
-  performance: {
-    window: "Last 60 minutes",
-    rps: wave(60, 82, 24, 1),
-    p99: wave(60, 4.1, 1.2, 2),
-    budgetExhausted: 0.4,
-    emptyRate: 3.2,
-    cacheHit: 61,
-    cacheEntries: 50_000,
-    routes: [
-      { route: "/v1/autocomplete", rps: 54.2, p50: 0.9, p95: 3.1, p99: 5.6, errors: 0.02 },
-      { route: "/v1/search", rps: 21.8, p50: 1.4, p95: 3.4, p99: 4.0, errors: 0.1 },
-      { route: "/v1/reverse", rps: 9.4, p50: 0.3, p95: 0.8, p99: 1.2, errors: 0 },
-      { route: "/v1/place/{id}", rps: 2.1, p50: 0.1, p95: 0.2, p99: 0.4, errors: 0 },
-      { route: "/v1/batch", rps: 0.6, p50: 8.4, p95: 22.0, p99: 41.0, errors: 0.5 },
-    ] as Latency[],
-    slow: [
-      { text: "calle mayor", ms: 14.8, note: "420 candidate streets" },
-      { text: "c/ san jose 12 3º b valencia", ms: 11.2, note: "4 readings" },
-      { text: "avenida de la constitucion", ms: 9.7, note: "typo tolerance" },
-    ],
-  },
   debug: {
     query: "gran via 1, madrid",
     parsed: "street “gran via” · number 1 · locality “madrid”",

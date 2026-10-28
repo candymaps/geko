@@ -1,8 +1,7 @@
 import { Activity, Database, Layers, Palette, Settings2 } from "lucide-preact";
 import { useTab } from "../hooks";
 import { useApi } from "../api";
-import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
-import { mock } from "./mock";
+import { Bars, BuildSteps, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { combine, type Stats, type Status } from "./api";
 import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, usePods, useRange } from "../pods";
 
@@ -20,10 +19,6 @@ const micros = (v: number | null) => (v === null ? "—" : `${v} µs`);
 const percent = (part: number, whole: number) => (whole === 0 ? "—" : `${((part / whole) * 100).toFixed(1)} %`);
 const plain = (html: string) => html.replace(/<[^>]+>/g, "");
 const degrees = (v: number[]) => v.map((n) => n.toFixed(2)).join(", ");
-
-function Sample() {
-  return <span class="gc-pill off">Sample data</span>;
-}
 
 function Overview({ status, version }: { status: Status; version?: string }) {
   const t = status.tiles;
@@ -77,16 +72,8 @@ function Overview({ status, version }: { status: Status; version?: string }) {
           ))}
         </div>
       </Card>
-      <Card title="Last build" wide aside={<Sample />}>
-        <ol class="gc-steps">
-          {mock.pipeline.map((s) => (
-            <li key={s.stage} class={s.state}>
-              <strong>{s.stage}</strong>
-              <span>{s.note}</span>
-              <small>{s.took}</small>
-            </li>
-          ))}
-        </ol>
+      <Card title="Last build" wide aside={status.last_build ? stamp(status.last_build.finished_unix) : undefined}>
+        <BuildSteps build={status.last_build} />
       </Card>
     </div>
   );

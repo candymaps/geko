@@ -634,12 +634,15 @@ main {
 }
 .gc-spark .line {
   fill: none;
-  stroke: var(--primary-ink);
+  stroke: var(--accent, var(--primary-ink));
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
 }
 .gc-spark .area {
   fill: var(--soft);
+}
+.gc-grid[style*="--accent"] .gc-spark .area {
+  fill: color-mix(in srgb, var(--accent) 16%, transparent);
 }
 .gc-spark .line.total {
   stroke: var(--fg);
@@ -725,7 +728,7 @@ main {
   height: 8px;
   margin: -4px 0 0 -4px;
   border-radius: 50%;
-  background: var(--primary-ink);
+  background: var(--accent, var(--primary-ink));
   box-shadow: 0 0 0 2px var(--bg);
   pointer-events: none;
 }

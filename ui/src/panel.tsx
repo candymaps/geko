@@ -3,6 +3,29 @@ import type { ComponentChildren } from "preact";
 import { useLayoutEffect, useRef, useState } from "preact/hooks";
 
 export const number = (n: number) => n.toLocaleString("en");
+
+/** The stages of the last build of a module, as it wrote them. */
+export interface LastBuild {
+  finished_unix: number;
+  stages: { stage: string; elapsed_ms: number; peak_mb: number | null; reused: boolean }[];
+}
+
+const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);
+
+export function BuildSteps({ build }: { build: LastBuild | null | undefined }) {
+  if (!build?.stages?.length) return <p class="muted">No build has left its stages yet.</p>;
+  return (
+    <ol class="gc-steps">
+      {build.stages.map((s) => (
+        <li key={s.stage} class={s.reused ? "reused" : "done"}>
+          <strong>{s.stage}</strong>
+          <span>{s.reused ? "up to date" : s.peak_mb === null ? "built" : `built, peak ${number(s.peak_mb)} MB`}</span>
+          <small>{took(s.elapsed_ms)}</small>
+        </li>
+      ))}
+    </ol>
+  );
+}
 export const size = (mb: number) => (mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`);
 
 export function Card({ title, aside, children, wide }: { title: string; aside?: ComponentChildren; children: ComponentChildren; wide?: boolean }) {
