@@ -40,6 +40,13 @@
     input.focus();
     input.select();
   });
+  // The tooltip goes on the whole button, not only on the icon (a <title> inside the SVG would).
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".aux-nav a").forEach(function (link) {
+      var icon = link.querySelector("svg[aria-label]");
+      if (icon) link.title = icon.getAttribute("aria-label");
+    });
+  });
   // On keyup, so that the theme clears the field first (it does that on Esc).
   document.addEventListener("DOMContentLoaded", function () {
     var input = document.getElementById("search-input");
