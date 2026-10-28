@@ -56,15 +56,15 @@ export function Sidebar({ modules, route, open, drawer, onToggle, onNavigate }: 
         {modules.map((m) => link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable))}
       </nav>
       <div class="foot">
-        <a class="item" href="/docs" title={open ? undefined : "API docs"}>
-          <span class="icon">
-            <BookOpen size={17} />
-          </span>
-          <span class="label">API docs</span>
-        </a>
         <span class="version" title="Version of the dashboard">
           v{VERSION}
         </span>
+        <a class="item" href="https://candymaps.github.io/geko/" target="_blank" rel="noreferrer" title={open ? undefined : "Documentation"}>
+          <span class="icon">
+            <BookOpen size={17} />
+          </span>
+          <span class="label">Documentation</span>
+        </a>
       </div>
     </aside>
   );
