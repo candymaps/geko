@@ -1,0 +1,47 @@
+<style>
+  .search-input-wrap::after {
+    content: "Ctrl K";
+    position: absolute;
+    top: 50%;
+    left: var(--hint-left, 10rem);
+    padding: 0.1em 0.4em;
+    transform: translateY(-50%);
+    border: 1px solid #eeebee;
+    border-radius: 4px;
+    background-color: #f5f6fa;
+    color: #5c5962;
+    font: 0.7rem/1.4 "SFMono-Regular", Menlo, Consolas, monospace;
+    pointer-events: none;
+  }
+  html[data-mac] .search-input-wrap::after {
+    content: "\2318 K";
+  }
+  .search-input-wrap:focus-within::after,
+  .search-input-wrap:has(.search-input:not(:placeholder-shown))::after {
+    display: none;
+  }
+</style>
+<script>
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) document.documentElement.setAttribute("data-mac", "");
+  // The hint sits right after the placeholder, whose width depends on the font.
+  function placeHint() {
+    var input = document.getElementById("search-input");
+    if (!input) return;
+    var style = getComputedStyle(input);
+    var context = document.createElement("canvas").getContext("2d");
+    context.font = style.fontStyle + " " + style.fontWeight + " " + style.fontSize + " " + style.fontFamily;
+    var width = context.measureText(input.placeholder).width;
+    input.parentNode.style.setProperty("--hint-left", input.offsetLeft + parseFloat(style.paddingLeft) + width + 8 + "px");
+  }
+  document.addEventListener("DOMContentLoaded", placeHint);
+  if (document.fonts) document.fonts.ready.then(placeHint);
+  document.addEventListener("keydown", function (e) {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "k") return;
+    var input = document.getElementById("search-input");
+    if (!input) return;
+    // The browser binds Ctrl+K to its own search bar.
+    e.preventDefault();
+    input.focus();
+    input.select();
+  });
+</script>
