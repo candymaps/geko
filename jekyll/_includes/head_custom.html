@@ -1,3 +1,6 @@
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tippy.js@6.3.7/dist/tippy.css" integrity="sha384-IBgYl+I5X6ZDZXI5zv1vsSE3VopDomz4BxSu/GlxaPHfFtcrJ3uj70z1w6srO9zU" crossorigin="anonymous">
+<script defer src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.11.8/dist/umd/popper.min.js" integrity="sha384-I7E8VVD/ismYTF4hNIPjVp/Zjvgyol6VFvRkX/vR+Vc4jQkC+hVqc2pM8ODewa9r" crossorigin="anonymous"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/tippy.js@6.3.7/dist/tippy-bundle.umd.min.js" integrity="sha384-AiTRpehQ7zqeua0Ypfa6Q4ki/ddhczZxrKtiQbTQUlJIhBkTeyoZP9/W/5ulFt29" crossorigin="anonymous"></script>
 <style>
   .search-input-wrap {
     border-right: 1px solid #eeebee;
@@ -40,11 +43,12 @@
     input.focus();
     input.select();
   });
-  // The tooltip goes on the whole button, not only on the icon (a <title> inside the SVG would).
+  // The tooltip of the icon links, on the whole button, below it, fading in and out.
   document.addEventListener("DOMContentLoaded", function () {
+    if (!window.tippy) return;
     document.querySelectorAll(".aux-nav a").forEach(function (link) {
       var icon = link.querySelector("svg[aria-label]");
-      if (icon) link.title = icon.getAttribute("aria-label");
+      if (icon) window.tippy(link, { content: icon.getAttribute("aria-label"), placement: "bottom", animation: "fade", duration: [200, 150] });
     });
   });
   // On keyup, so that the theme clears the field first (it does that on Esc).
