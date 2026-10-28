@@ -66,8 +66,8 @@ export function PodFilter({ pods, only, onPick }: { pods: PodData<unknown>[]; on
 }
 
 /** A series that ends at `end` (a unix second), moved to end at `to`; what falls outside is `fill`. */
-export function align<V>(data: V[], end: number, to: number, fill: V): V[] {
-  const shift = to - end;
+export function align<V>(data: V[], end: number, to: number, fill: V, step = 1): V[] {
+  const shift = Math.round((to - end) / step);
   return data.map((_, i) => data[i - shift] ?? fill);
 }
 
@@ -76,9 +76,9 @@ interface Window<V> {
   values: V[];
 }
 
-function merge<V>(windows: Window<V>[], join: (values: V[]) => V, fill: V): Window<V> {
+function merge<V>(windows: Window<V>[], join: (values: V[]) => V, fill: V, step: number): Window<V> {
   const end = Math.max(...windows.map((w) => w.end_unix));
-  const aligned = windows.map((w) => align(w.values, w.end_unix, end, fill));
+  const aligned = windows.map((w) => align(w.values, w.end_unix, end, fill, step));
   return { end_unix: end, values: aligned[0].map((_, i) => join(aligned.map((a) => a[i]))) };
 }
 
@@ -87,22 +87,24 @@ const worst = (values: (number | null)[]) => {
   return known.length === 0 ? null : Math.max(...known);
 };
 
-/** The requests of several pods, second by second (or minute by minute): added, once aligned in time. */
-export function sumWindow(windows: { end_unix: number; requests: number[] }[]): { end_unix: number; requests: number[] } {
+/** The requests of several pods, `step` seconds by `step` seconds (1 or 60): added, once aligned in time. */
+export function sumWindow(windows: { end_unix: number; requests: number[] }[], step = 1): { end_unix: number; requests: number[] } {
   const { end_unix, values } = merge(
     windows.map((w) => ({ end_unix: w.end_unix, values: w.requests })),
     (v) => v.reduce((t, n) => t + n, 0),
     0,
+    step,
   );
   return { end_unix, requests: values };
 }
 
 /** The p99 of several pods: the worst of them. A percentile of the whole cannot come from those of its parts. */
-export function worstWindow(windows: { end_unix: number; p99: (number | null)[] }[]): { end_unix: number; p99: (number | null)[] } {
+export function worstWindow(windows: { end_unix: number; p99: (number | null)[] }[], step = 1): { end_unix: number; p99: (number | null)[] } {
   const { end_unix, values } = merge(
     windows.map((w) => ({ end_unix: w.end_unix, values: w.p99 })),
     worst,
     null,
+    step,
   );
   return { end_unix, p99: values };
 }
@@ -129,21 +131,66 @@ export interface Shown<T> {
  * when none is focused or it is gone), and the stats of those as a single one (`combine`), or `null`
  * when none is.
  */
-export function usePodView<T>(module: string, path: string, combine: (list: T[]) => T) {
-  const { pods, error } = usePods<T>(module, path, 1_000);
+export function usePodView<T>(module: string, path: string, combine: (list: T[]) => T, every = 1_000) {
+  const { pods, error } = usePods<T>(module, path, every);
   const filter = usePodFilter();
   const focused = (pods ?? []).some((p) => p.pod === filter.only && p.data !== null) ? filter.only : null;
   const shown: Shown<T>[] = (pods ?? []).flatMap((p, index) => (p.data !== null && (focused === null || p.pod === focused) ? [{ pod: p.pod, index, data: p.data }] : []));
-  return { pods, error, filter, shown, stats: shown.length > 0 ? combine(shown.map((s) => s.data)) : null };
+  const accent = focused === null ? undefined : `var(--pod-${tone((pods ?? []).findIndex((p) => p.pod === focused))})`;
+  return { pods, error, filter, shown, accent, stats: shown.length > 0 ? combine(shown.map((s) => s.data)) : null };
 }
 
 /** One line for each pod shown, and the total of them when there are several and it means something. */
-export function podSeries<T>(shown: Shown<T>[], read: (data: T) => { end_unix: number; values: number[] }, end: number, sum?: number[]): Series[] {
+export function podSeries<T>(shown: Shown<T>[], read: (data: T) => { end_unix: number; values: number[] }, end: number, sum?: number[], step = 1): Series[] {
   const lines = shown.map<Series>((s) => {
     const { end_unix, values } = read(s.data);
-    return { label: shortName(s.pod), tone: tone(s.index), data: align(values, end_unix, end, 0) };
+    return { label: shortName(s.pod), tone: tone(s.index), data: align(values, end_unix, end, 0, step) };
   });
   return sum && shown.length > 1 ? [...lines, { label: "Total", data: sum }] : lines;
+}
+
+/**
+ * How far back the charts of a view look. The module keeps the last minute second by second and the last
+ * hour minute by minute, so a range of minutes reads the second; the view asks for new data as often as
+ * a point of its range can change.
+ */
+export interface Range {
+  id: string;
+  label: string;
+  hour: boolean;
+  points: number;
+  every: number;
+}
+
+export const RANGES: Range[] = [
+  { id: "60s", label: "Last 60 seconds", hour: false, points: 60, every: 1_000 },
+  { id: "5m", label: "Last 5 minutes", hour: true, points: 5, every: 5_000 },
+  { id: "15m", label: "Last 15 minutes", hour: true, points: 15, every: 10_000 },
+  { id: "30m", label: "Last 30 minutes", hour: true, points: 30, every: 15_000 },
+  { id: "60m", label: "Last hour", hour: true, points: 60, every: 30_000 },
+];
+
+export function useRange(): { range: Range; pick: (id: string) => void } {
+  const [id, setId] = useState(RANGES[0].id);
+  return { range: RANGES.find((r) => r.id === id) ?? RANGES[0], pick: setId };
+}
+
+/** The seconds each point of the range covers. */
+export const stepOf = (range: Range) => (range.hour ? 60 : 1);
+
+/** The part of a window (60 points) that the range shows. */
+export const inRange = <V,>(range: Range, values: V[]): V[] => (range.hour ? values.slice(-range.points) : values);
+
+export function RangeSelect({ range, onPick }: { range: Range; onPick: (id: string) => void }) {
+  return (
+    <select class="gc-range" aria-label="Time range of the charts" value={range.id} onChange={(e) => onPick(e.currentTarget.value)}>
+      {RANGES.map((r) => (
+        <option key={r.id} value={r.id}>
+          {r.label}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 /** In place of the panels when no pod gives data to show. */

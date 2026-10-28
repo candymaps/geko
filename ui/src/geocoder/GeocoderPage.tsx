@@ -2,7 +2,7 @@ import { Activity, Bug, Database, Layers, Settings2, Zap, type LucideIcon } from
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { useApi } from "../api";
 import { combine, type Stats, type Status } from "./api";
-import { NoPods, PodFilter, podSeries, usePodView } from "../pods";
+import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, useRange } from "../pods";
 import { useTab } from "../hooks";
 import { mock } from "./mock";
 
@@ -157,10 +157,16 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { pods, error, filter, shown, stats } = usePodView<Stats>("geocoder", "geocoder/v1/stats", combine);
+  const { range, pick: pickRange } = useRange();
+  const { pods, error, filter, shown, accent, stats } = usePodView<Stats>("geocoder", "geocoder/v1/stats", combine, range.every);
   const p = mock.performance;
   if (!pods) return <Placeholder error={error} module="geocoder" />;
-  const filtered = <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />;
+  const filtered = (
+    <div class="gc-bar">
+      <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />
+      <RangeSelect range={range} onPick={pickRange} />
+    </div>
+  );
   if (!stats) {
     return (
       <>
@@ -173,17 +179,22 @@ function Performance() {
   const lookups = stats.cache.hits + stats.cache.misses;
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
   const total = stats.routes.reduce((t, r) => t + r.requests, 0);
-  const minute = stats.last_minute;
-  const per = (pick: (s: Stats) => (number | null)[]) => (data: Stats) => ({ end_unix: data.last_minute.end_unix, values: pick(data).map((v) => v ?? 0) });
+  const step = stepOf(range);
+  const windowOf = (s: Stats) => (range.hour ? s.last_hour : s.last_minute);
+  const latest = windowOf(stats);
+  const per = (pick: (w: Stats["last_minute"]) => (number | null)[], scale = 1) => (data: Stats) => ({
+    end_unix: windowOf(data).end_unix,
+    values: inRange(range, pick(windowOf(data))).map((v) => (v ?? 0) / scale),
+  });
   return (
     <>
     {filtered}
-    <div class="gc-grid">
-      <Card title="Requests per second" aside="Last 60 seconds">
-        <Spark series={podSeries(shown, per((s) => s.last_minute.requests), minute.end_unix, minute.requests)} unit="req/s" />
+    <div class="gc-grid" style={accent ? { "--accent": accent } : undefined}>
+      <Card title="Requests per second" aside={range.label}>
+        <Spark series={podSeries(shown, per((w) => w.requests, step), latest.end_unix, inRange(range, latest.requests).map((v) => v / step), step)} unit="req/s" step={step} />
       </Card>
-      <Card title={`p99 latency (ms)`} aside={`Last 60 seconds${worstOf}`}>
-        <Spark series={podSeries(shown, per((s) => s.last_minute.p99_ms), minute.end_unix)} unit="ms" />
+      <Card title={`p99 latency (ms)`} aside={range.label}>
+        <Spark series={podSeries(shown, per((w) => w.p99_ms), latest.end_unix, undefined, step)} unit="ms" step={step} />
       </Card>
       <Card title="Health of the answers" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">

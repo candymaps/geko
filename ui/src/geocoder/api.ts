@@ -32,9 +32,9 @@ export interface Stats {
 
 /** The counters of several pods as one: what is added is added, and a percentile is the worst of the pods (see `worstWindow`). */
 export function combine(list: Stats[]): Stats {
-  const window = (w: (s: Stats) => Stats["last_hour"]): Stats["last_hour"] => {
-    const sum = sumWindow(list.map((s) => w(s)));
-    const worst = worstWindow(list.map((s) => ({ end_unix: w(s).end_unix, p99: w(s).p99_ms })));
+  const window = (w: (s: Stats) => Stats["last_hour"], step: number): Stats["last_hour"] => {
+    const sum = sumWindow(list.map((s) => w(s)), step);
+    const worst = worstWindow(list.map((s) => ({ end_unix: w(s).end_unix, p99: w(s).p99_ms })), step);
     return { end_unix: sum.end_unix, requests: sum.requests, p99_ms: worst.p99 };
   };
   const all = list.flatMap((s) => s.routes);
@@ -53,7 +53,7 @@ export function combine(list: Stats[]): Stats {
     cut_short: total(list.map((s) => s.cut_short)),
     merged_duplicates: total(list.map((s) => s.merged_duplicates)),
     cache: { enabled: list.some((s) => s.cache.enabled), hits: total(list.map((s) => s.cache.hits)), misses: total(list.map((s) => s.cache.misses)) },
-    last_hour: window((s) => s.last_hour),
-    last_minute: window((s) => s.last_minute),
+    last_hour: window((s) => s.last_hour, 60),
+    last_minute: window((s) => s.last_minute, 1),
   };
 }

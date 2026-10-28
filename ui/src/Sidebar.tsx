@@ -1,5 +1,6 @@
 import { BookOpen, Box, Earth, Layers, MapPinned, PanelLeftClose, PanelLeftOpen, type LucideIcon } from "lucide-preact";
 import type { ModuleInfo } from "./api";
+import { VERSION } from "./version";
 
 const ICONS: Record<string, LucideIcon> = { geocoder: MapPinned, tiles: Layers };
 
@@ -61,6 +62,9 @@ export function Sidebar({ modules, route, open, drawer, onToggle, onNavigate }: 
           </span>
           <span class="label">API docs</span>
         </a>
+        <span class="version" title="Version of the dashboard">
+          v{VERSION}
+        </span>
       </div>
     </aside>
   );

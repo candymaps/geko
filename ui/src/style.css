@@ -226,7 +226,16 @@ body {
   white-space: nowrap;
   transition: opacity 0.3s;
 }
+.sidebar .version {
+  display: block;
+  padding: 6px 12px 0;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  transition: opacity 0.3s;
+}
 .sidebar:not(.open) .label,
+.sidebar:not(.open) .version,
 .sidebar:not(.open) .eyebrow {
   opacity: 0;
   pointer-events: none;
@@ -762,7 +771,7 @@ main {
 }
 .gc-bars .fill {
   height: 100%;
-  background: var(--primary);
+  background: var(--accent, var(--primary));
 }
 .gc-bars em {
   color: var(--muted);
@@ -779,7 +788,7 @@ main {
 .gc-hist .col {
   flex: 1;
   border-radius: 3px 3px 0 0;
-  background: var(--primary);
+  background: var(--accent, var(--primary));
 }
 .gc-axis {
   display: flex;
@@ -825,7 +834,7 @@ main {
 .gc-meter i {
   display: block;
   height: 100%;
-  background: var(--primary);
+  background: var(--accent, var(--primary));
 }
 .gc-dot {
   position: relative;
@@ -1025,13 +1034,34 @@ main {
   }
 }
 
-/* The pods a view shows, above its panels. */
+/* What a view shows, above its panels: its pods and the time range of its charts. */
+.gc-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+.gc-range {
+  margin-left: auto;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.gc-range:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 .gc-pods {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
 }
 .gc-pod {
   display: inline-flex;

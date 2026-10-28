@@ -36,8 +36,8 @@ export interface Series {
   data: number[];
 }
 
-/** One value per second, the last one being the current second; a line for each series. */
-export function Spark({ series, unit }: { series: Series[]; unit: string }) {
+/** One value per `step` seconds (1 or 60), the last one being the current one; a line for each series. */
+export function Spark({ series, unit, step = 1 }: { series: Series[]; unit: string; step?: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const peak = Math.max(0, ...series.flatMap((s) => s.data));
   const max = peak * 1.1 || 1;
@@ -55,7 +55,7 @@ export function Spark({ series, unit }: { series: Series[]; unit: string }) {
   const cls = (s: Series) => (s.tone === undefined ? "total" : `pod-${s.tone}`);
   return (
     <div class="gc-spark-wrap" onPointerMove={at} onPointerLeave={() => setHover(null)}>
-      <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last 60 seconds, peak ${peak.toFixed(1)} ${unit}`}>
+      <svg class="gc-spark" viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" role="img" aria-label={`Last ${last + 1} ${step === 1 ? "seconds" : "minutes"}, peak ${peak.toFixed(1)} ${unit}`}>
         {lone && <polygon points={`0,${h} ${line(series[0].data).join(" ")} ${w},${h}`} class="area" />}
         {series.map((s) => (
           <polyline key={s.label} points={line(s.data).join(" ")} class={`line ${lone ? "" : cls(s)}`} />
@@ -75,7 +75,7 @@ export function Spark({ series, unit }: { series: Series[]; unit: string }) {
                 {reading(s.data[hover] ?? 0)} {unit}
               </strong>
             ))}
-            <small>{ago === 0 ? "This second" : `${ago} s ago`}</small>
+            <small>{step === 1 ? (ago === 0 ? "This second" : `${ago} s ago`) : ago === 0 ? "This minute" : `${ago} min ago`}</small>
           </span>
         </>
       )}

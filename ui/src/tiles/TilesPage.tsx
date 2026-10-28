@@ -4,7 +4,7 @@ import { useApi } from "../api";
 import { Bars, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
 import { mock } from "./mock";
 import { combine, type Stats, type Status } from "./api";
-import { NoPods, PodFilter, podSeries, usePodView, usePods } from "../pods";
+import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, usePods, useRange } from "../pods";
 
 const TABS: Tab[] = [
   { id: "overview", label: "Overview", Icon: Database },
@@ -128,9 +128,15 @@ function Sources({ status }: { status: Status }) {
 }
 
 function Performance() {
-  const { pods, error, filter, shown, stats } = usePodView<Stats>("tiles", "tiles/stats.json", combine);
+  const { range, pick: pickRange } = useRange();
+  const { pods, error, filter, shown, accent, stats } = usePodView<Stats>("tiles", "tiles/stats.json", combine, range.every);
   if (!pods) return <Placeholder error={error} module="tiles" />;
-  const filtered = <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />;
+  const filtered = (
+    <div class="gc-bar">
+      <PodFilter pods={pods} only={filter.only} onPick={filter.pick} />
+      <RangeSelect range={range} onPick={pickRange} />
+    </div>
+  );
   if (!stats) {
     return (
       <>
@@ -140,8 +146,13 @@ function Performance() {
     );
   }
   const worstOf = shown.length > 1 ? "; with several pods, the worst of them" : "";
-  const minute = stats.last_minute;
-  const per = (pick: (s: Stats) => (number | null)[]) => (data: Stats) => ({ end_unix: data.last_minute.end_unix, values: pick(data).map((v) => v ?? 0) });
+  const step = stepOf(range);
+  const windowOf = (s: Stats) => (range.hour ? s.last_hour : s.last_minute);
+  const latest = windowOf(stats);
+  const per = (pick: (w: Stats["last_minute"]) => (number | null)[], scale = 1) => (data: Stats) => ({
+    end_unix: windowOf(data).end_unix,
+    values: inRange(range, pick(windowOf(data))).map((v) => (v ?? 0) / scale),
+  });
   const uptime = Math.max(1, Date.now() / 1000 - stats.since_unix);
   const served = stats.zooms.reduce((t, z) => t + z.tiles, 0);
   const empty = stats.zooms.reduce((t, z) => t + z.empty, 0);
@@ -152,12 +163,12 @@ function Performance() {
   return (
     <>
     {filtered}
-    <div class="gc-grid">
-      <Card title="Requests per second" aside="Last 60 seconds">
-        <Spark series={podSeries(shown, per((s) => s.last_minute.requests), minute.end_unix, minute.requests)} unit="req/s" />
+    <div class="gc-grid" style={accent ? { "--accent": accent } : undefined}>
+      <Card title="Requests per second" aside={range.label}>
+        <Spark series={podSeries(shown, per((w) => w.requests, step), latest.end_unix, inRange(range, latest.requests).map((v) => v / step), step)} unit="req/s" step={step} />
       </Card>
-      <Card title="p99 time in the module (µs)" aside={`Last 60 seconds${worstOf}`}>
-        <Spark series={podSeries(shown, per((s) => s.last_minute.p99_us), minute.end_unix)} unit="µs" />
+      <Card title="p99 time in the module (µs)" aside={`${range.label}${worstOf}`}>
+        <Spark series={podSeries(shown, per((w) => w.p99_us), latest.end_unix, undefined, step)} unit="µs" step={step} />
       </Card>
       <Card title="Served" wide aside={`Since the module started, ${stamp(stats.since_unix)}`}>
         <div class="gc-stats four">
