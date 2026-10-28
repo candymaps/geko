@@ -1,9 +1,12 @@
 <style>
+  .search-input-wrap {
+    border-right: 1px solid #eeebee;
+  }
   .search-input-wrap::after {
     content: "Ctrl K";
     position: absolute;
     top: 50%;
-    left: var(--hint-left, 10rem);
+    right: 0.75rem;
     padding: 0.1em 0.4em;
     transform: translateY(-50%);
     border: 1px solid #eeebee;
@@ -23,18 +26,6 @@
 </style>
 <script>
   if (/Mac|iPhone|iPad/.test(navigator.platform)) document.documentElement.setAttribute("data-mac", "");
-  // The hint sits right after the placeholder, whose width depends on the font.
-  function placeHint() {
-    var input = document.getElementById("search-input");
-    if (!input) return;
-    var style = getComputedStyle(input);
-    var context = document.createElement("canvas").getContext("2d");
-    context.font = style.fontStyle + " " + style.fontWeight + " " + style.fontSize + " " + style.fontFamily;
-    var width = context.measureText(input.placeholder).width;
-    input.parentNode.style.setProperty("--hint-left", input.offsetLeft + parseFloat(style.paddingLeft) + width + 8 + "px");
-  }
-  document.addEventListener("DOMContentLoaded", placeHint);
-  if (document.fonts) document.fonts.ready.then(placeHint);
   document.addEventListener("keydown", function (e) {
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "k") return;
     var input = document.getElementById("search-input");
