@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# An example for a cluster with ReadWriteMany storage and an Ingress controller, with the operator
+# (`geko operator`) in place of the manifests of ../prod: the images of a version, and the config
+# map `geko`, which is what the operator reads. The replicas and the resources of each module are in
+# its [deploy.<module>] (geko.toml), not here. The host of the Ingress, the size and the class of the
+# volume are flags of the operator (`geko k8s install --help`): add them to its args, as below.
+# Copy it and change it.
+namespace: geko
+resources:
+  - ../../operator
+# The operator reads the config map by its name, and rolls the pods by the digest of its data.
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: geko
+    files:
+      - geko.toml
+images:
+  - name: ghcr.io/candymaps/geko
+    newTag: latest
+patches:
+  - target:
+      kind: Deployment
+      name: geko-operator
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --host
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: geko.example.org

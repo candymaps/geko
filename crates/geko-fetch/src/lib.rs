@@ -311,6 +311,22 @@ impl HttpDownloader {
     }
 }
 
+/// What `url` answers to a GET, as text: no retries, no proxy and no more than `max_bytes`, for what
+/// the host asks of its own pods, where a slow answer is an answer.
+pub fn get_text(url: &str, timeout: Duration, max_bytes: u64) -> Result<String> {
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let response = agent.get(url).call().map_err(|e| match e {
+        ureq::Error::Status(code, _) => GekoError::Data(format!("GET {url} returned HTTP {code}")),
+        ureq::Error::Transport(t) => GekoError::Data(format!("GET {url}: {t}")),
+    })?;
+    let mut body = String::new();
+    response.into_reader().take(max_bytes + 1).read_to_string(&mut body).map_err(|e| GekoError::Data(format!("GET {url}: {e}")))?;
+    if body.len() as u64 > max_bytes {
+        return Err(GekoError::Data(format!("GET {url} answered more than {max_bytes} bytes")));
+    }
+    Ok(body)
+}
+
 fn request_error(method: &str, url: &str, e: ureq::Error) -> AttemptError {
     match e {
         ureq::Error::Status(code, _) => {

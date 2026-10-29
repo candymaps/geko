@@ -1,0 +1,28 @@
+# An example geko.toml for a cluster with the operator: change the scope, and the sources in
+# geko-<module>.toml files beside it (add them to the files of the config map in kustomization.yaml).
+[modules]
+geocoder = true
+tiles    = true
+
+[[scope]]
+country = "ES"
+
+[data]
+accept_licenses = true
+keep_downloads  = true
+max_age_days    = 30
+
+[deploy]
+mode = "operator"
+
+# What the operator asks of the cluster for each module: the pods that serve (replicas, cpu, memory)
+# and the job that builds (build_cpu, build_memory).
+[deploy.geocoder]
+replicas     = 3
+cpu          = "500m"
+memory       = "4Gi"
+build_cpu    = "2"
+build_memory = "6Gi"
+
+[deploy.tiles]
+replicas = 1

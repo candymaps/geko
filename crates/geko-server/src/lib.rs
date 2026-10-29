@@ -1,10 +1,13 @@
 //! What geko serves for every module (docs/MODULES_PLAN.md): `/health`, `/metrics`,
 //! `/v1/attribution`, `/openapi.yaml` and `/docs`, API keys, CORS and the rate limit, the bundle
 //! that every module loads and keeps watching, and the routes of each active module, mounted under
-//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio.
+//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio; the operator mode
+//! also serves the dashboard alone (`serve_dashboard`).
 
 mod access;
+mod dashboard;
 mod metrics;
+mod ui;
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -25,6 +28,7 @@ use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Mod
 use serde_json::json;
 
 pub use access::Access;
+pub use dashboard::{ModuleStatus, PodAnswer, Pods, Statuses, serve as serve_dashboard};
 
 /// The module behind a mount, which a bundle built by another version of it switches to that
 /// version (`Reopen`); requests in flight finish on the one they started on.
@@ -239,8 +243,6 @@ impl BundleManager {
 /// those of the modules.
 const OPENAPI: &str = include_str!("../../../openapi.yaml");
 const DOCS: &str = include_str!("docs.html");
-/// `/`: a map with what the active modules offer (the geocoder's search), through their API.
-const DEMO: &str = include_str!("demo.html");
 
 /// Licenses and attributions of the served data (PROJECT.md §6): the sources of the bundle, whom
 /// to ask for the code that reproduces it, and what each module adds under its name.
@@ -257,6 +259,11 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
         }
     }
     body
+}
+
+/// `/admin/api/modules`: the active modules, so the dashboard offers a tab for each.
+fn module_list(modules: &[Mounted]) -> serde_json::Value {
+    modules.iter().map(|m| json!({ "name": m.name(), "version": m.slot.version(), "unavailable": m.module.unavailable() })).collect()
 }
 
 /// `/docs`: Swagger UI over the reference of geko and those of the modules.
@@ -360,6 +367,7 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
     let names: Vec<String> = modules.iter().map(|m| m.name().to_owned()).collect();
     let (attribution_bundles, attribution_modules) = (bundles.clone(), modules.to_vec());
     let docs = docs(modules);
+    let listed = modules.to_vec();
     let shared_routes = Router::new()
         .route(
             "/v1/attribution",
@@ -370,7 +378,15 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
         )
         .route("/openapi.yaml", get(|| async { ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
         .route("/docs", get(move || async move { axum::response::Html(docs) }))
-        .route("/", get(|| async { axum::response::Html(DEMO) }));
+        .route(
+            "/admin/api/modules",
+            get(move || {
+                let body = module_list(&listed);
+                async move { Json(body) }
+            }),
+        );
+    // `/`: the dashboard (ui/), a map with what the active modules offer, through their API.
+    let shared_routes = ui::mount(shared_routes);
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
         let bundles = bundles.clone();
@@ -419,7 +435,9 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             async move { ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text) }
         }),
     );
-    let guard = access::Guard::new(access, public_paths(modules));
+    let mut public = public_paths(modules);
+    public.extend(ui::paths().map(str::to_owned));
+    let guard = access::Guard::new(access, public);
     // A panic in one request becomes a 500 for that request only.
     tracked
         .merge(metrics_route)
@@ -543,9 +561,6 @@ mod tests {
         assert_eq!(body["body"], "payload");
         assert_eq!(get_json(&app, "/v1/echo/x").await.0, StatusCode::NOT_FOUND, "only under its name");
 
-        let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
-        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/"), "the demo of the host");
         let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.headers()[header::LOCATION], "/fake/");
     }
@@ -562,6 +577,34 @@ mod tests {
         let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
         assert!(page.starts_with("<!doctype html>") && page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_is_served_at_the_root_without_a_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        let request = |encoding: &str| axum::http::Request::get("/").header(header::ACCEPT_ENCODING, encoding).body(Body::empty()).unwrap();
+
+        let res = app.clone().oneshot(request("identity")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
+        assert!(!res.headers().contains_key(header::CONTENT_ENCODING));
+        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(page.starts_with("<!doctype html>"), "{page}");
+
+        let res = app.oneshot(request("gzip")).await.unwrap();
+        // Without `ui/dist` at compile time the page that says so is small and not compressed.
+        if res.headers().contains_key(header::CONTENT_ENCODING) {
+            assert_eq!(&to_bytes(res.into_body(), 1 << 20).await.unwrap()[..2], &[0x1f, 0x8b]);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_lists_the_active_modules_behind_the_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        assert_eq!(get_json(&app, "/admin/api/modules").await.0, StatusCode::UNAUTHORIZED);
+        let (status, body) = get_json(&app, "/admin/api/modules?api_key=k").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!([{ "name": "fake", "version": "1.0.0", "unavailable": null }]));
     }
 
     #[tokio::test]

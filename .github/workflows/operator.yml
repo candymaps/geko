@@ -1,7 +1,8 @@
-# The operator mode in a kind cluster (docs/OPERATOR_MODE_PLAN.md, step 8): the same `make start-dev`
-# as a developer runs with `[deploy] mode = "operator"`, on Luxembourg (deploy/overlays/ci), and then
-# ci/operator.sh: each module answers, one that falls does not take the other, each scales on its
-# own. It builds both modules inside Docker from their repositories, so it needs a token that reads
+# The operator mode in a kind cluster (docs/OPERATOR_MODE_PLAN.md, steps 8 and 10): the same
+# `make start-dev` as a developer runs with `[deploy] mode = "operator"`, which installs the operator
+# (deploy/overlays/ci, Luxembourg), and then ci/operator.sh: each module answers, the dashboard lists
+# them, one that falls does not take the other, and the operator follows the config map.
+# It builds both modules inside Docker from their repositories, so it needs a token that reads
 # them: the secret GEKO_MODULES_TOKEN (contents of candymaps/geko-geocoder and candymaps/geko-tiles).
 # Without it, the job says so and passes: a check that cannot run is not one that failed.
 #
@@ -17,6 +18,8 @@ on:
       - develop/k8s-dev.sh
       - ci/operator.sh
       - crates/geko-app/src/k8s.rs
+      - crates/geko-app/src/operator.rs
+      - crates/geko-kube/**
       - crates/geko-app/src/config.rs
       - crates/geko-app/src/bundle*.rs
       - crates/geko-server/**

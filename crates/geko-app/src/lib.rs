@@ -7,6 +7,7 @@ mod config;
 mod dylib;
 mod k8s;
 mod modules;
+mod operator;
 mod progress;
 mod remote;
 mod run;
@@ -86,6 +87,18 @@ enum Command {
         #[command(subcommand)]
         what: Option<Purge>,
     },
+    /// Run as the operator of a Kubernetes cluster (`[deploy] mode = "operator"`): make the
+    /// deployments, services, build jobs and Ingress of the active modules from the config map
+    /// `geko`, keep them so, and serve the dashboard with what the cluster runs. Needs no module.
+    Operator {
+        #[command(flatten)]
+        manifests: ManifestArgs,
+        #[arg(long, default_value = "0.0.0.0:8080")]
+        listen: SocketAddr,
+        /// The namespace of the config map and of what it makes; by default that of the pod.
+        #[arg(long)]
+        namespace: Option<String>,
+    },
     /// What the operator mode puts in a Kubernetes cluster.
     K8s {
         #[command(subcommand)]
@@ -97,22 +110,64 @@ enum Command {
     Module(Vec<String>),
 }
 
+/// What decides the manifests of the operator mode besides the configuration.
+#[derive(clap::Args, Clone)]
+struct ManifestArgs {
+    /// The image of a module is this prefix followed by its name.
+    #[arg(long, default_value = "ghcr.io/candymaps/geko-")]
+    image_prefix: String,
+    #[arg(long, default_value = "latest")]
+    tag: String,
+    /// One image for every module (the one of `make start-dev`), instead of the prefix and the tag.
+    #[arg(long)]
+    image: Option<String>,
+    /// Size of the volume of bundles and downloads, which every module shares.
+    #[arg(long, default_value = "20Gi")]
+    storage: String,
+    #[arg(long)]
+    storage_class: Option<String>,
+    /// How the volume is mounted: `ReadWriteMany` so that every module reaches it from any node;
+    /// `ReadWriteOnce` for a cluster of one node (kind) whose storage offers no other.
+    #[arg(long, default_value = "ReadWriteMany")]
+    access_mode: String,
+    /// The host name that the Ingress answers for; any when none.
+    #[arg(long)]
+    host: Option<String>,
+}
+
+impl ManifestArgs {
+    fn options(&self) -> k8s::Options {
+        k8s::Options {
+            image_prefix: self.image_prefix.clone(),
+            tag: self.tag.clone(),
+            image: self.image.clone(),
+            storage: self.storage.clone(),
+            storage_class: self.storage_class.clone(),
+            access_mode: self.access_mode.clone(),
+            dashboard: None,
+            host: self.host.clone(),
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum K8s {
     /// Write the manifests for the active modules and `[deploy]` of the configuration to the
     /// standard output: a deployment and a service per module, a cron job that builds it, the
     /// volume they share and the Ingress. Needs no module downloaded, nor a cluster.
     Render {
-        /// The image of a module is this prefix followed by its name.
-        #[arg(long, default_value = "ghcr.io/candymaps/geko-")]
-        image_prefix: String,
-        #[arg(long, default_value = "latest")]
-        tag: String,
-        /// Size of the volume of bundles and downloads, which every module shares.
-        #[arg(long, default_value = "20Gi")]
-        storage: String,
+        #[command(flatten)]
+        manifests: ManifestArgs,
+    },
+    /// Write the manifests that install the operator (`geko operator`) in a cluster: its account
+    /// and permissions, its deployment and the service of its dashboard. It makes the rest.
+    Install {
+        #[command(flatten)]
+        manifests: ManifestArgs,
+        /// The image that runs the operator; by default `ghcr.io/candymaps/geko:<tag>`, the one
+        /// with no module in it.
         #[arg(long)]
-        storage_class: Option<String>,
+        operator_image: Option<String>,
     },
 }
 
@@ -160,15 +215,19 @@ fn serve(config: &Config, opener: &Arc<Opener>, opened: &[Opened], listen: Optio
         reopen: Some(reopen),
     };
     let addr = listen.unwrap_or(config.serve.listen);
+    let contact = Some(config.serve.attribution_contact.clone()).filter(|c| !c.is_empty());
+    tokio::runtime::Runtime::new()?.block_on(geko_server::serve(addr, mounted, Some(bundles), access(config), contact)).context("server failed")
+}
+
+/// Who may call the API and how often, from `[serve]`.
+fn access(config: &Config) -> geko_server::Access {
     let s = &config.serve;
-    let access = geko_server::Access {
+    geko_server::Access {
         cors_origins: s.cors_origins.clone(),
         api_keys: s.api_keys.clone(),
         rate_per_s: s.rate_limit_per_s,
         burst: if s.rate_limit_burst > 0.0 { s.rate_limit_burst } else { s.rate_limit_per_s * 2.0 },
-    };
-    let contact = Some(s.attribution_contact.clone()).filter(|c| !c.is_empty());
-    tokio::runtime::Runtime::new()?.block_on(geko_server::serve(addr, mounted, Some(bundles), access, contact)).context("server failed")
+    }
 }
 
 /// Every active module prepares what the commands that build need (the geocoder, its country
@@ -220,18 +279,21 @@ fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Resul
     Ok(())
 }
 
-/// `[deploy] mode = "operator"` makes geko the control plane of a cluster, which does not exist yet
-/// (docs/OPERATOR_MODE_PLAN.md, step 10). Until it does, the commands that run every module in one
-/// process fail with what to do instead, rather than run in the other mode without a word. One
-/// module per process (`--module`) is how the pods of the operator mode run, so it goes on.
+/// In `[deploy] mode = "operator"` no process runs every module (docs/OPERATOR_MODE_PLAN.md): the
+/// commands that would fail with what to do instead, rather than run in the other mode without a
+/// word. One module per process (`--module`) is how the pods that the operator makes run. `geko
+/// operator` itself only makes sense in that mode.
 fn check_deploy(config: &Config, cli: &Cli) -> anyhow::Result<()> {
     let runs_every_module = matches!(cli.command, Command::Build { .. } | Command::Serve { .. } | Command::Up { .. });
     if config.deploy.mode == DeployMode::Operator && runs_every_module && cli.modules.is_none() {
         anyhow::bail!(
-            "[deploy] mode = \"operator\": geko as the operator of a cluster is not implemented yet. \
-             Run one module per process (`geko serve --module geocoder`, `geko build --module geocoder`), \
-             or set mode = \"single\" (the default) to run every module in this one"
+            "[deploy] mode = \"operator\": a process runs one module (`geko serve --module geocoder`, \
+             `geko build --module geocoder`), and `geko operator` makes those in a cluster. \
+             Set mode = \"single\" (the default) to run every module in this one"
         );
+    }
+    if config.deploy.mode != DeployMode::Operator && matches!(cli.command, Command::Operator { .. }) {
+        anyhow::bail!("`geko operator` needs [deploy] mode = \"operator\" in the configuration");
     }
     Ok(())
 }
@@ -260,10 +322,20 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     );
     let config = Config::load(&path)?;
     check_deploy(&config, &cli)?;
-    if let Command::K8s { what: K8s::Render { image_prefix, tag, storage, storage_class } } = &cli.command {
-        let options = k8s::Options { image_prefix: image_prefix.clone(), tag: tag.clone(), storage: storage.clone(), storage_class: storage_class.clone() };
-        print!("{}", k8s::render(&config, &options));
-        return Ok(());
+    match &cli.command {
+        Command::K8s { what: K8s::Render { manifests } } => {
+            print!("{}", k8s::render(&config, &manifests.options()));
+            return Ok(());
+        }
+        Command::K8s { what: K8s::Install { manifests, operator_image } } => {
+            let image = operator_image.clone().unwrap_or_else(|| format!("ghcr.io/candymaps/geko:{}", manifests.tag));
+            print!("{}", k8s::install(&manifests.options(), &image));
+            return Ok(());
+        }
+        Command::Operator { manifests, listen, namespace } => {
+            return operator::run(&config, manifests.options(), *listen, namespace.clone());
+        }
+        _ => {}
     }
     let active = modules::resolve(&config, cli.modules.as_deref())?;
     let mut opener = Opener::new(&config, &path, linked, modules::local()?);
@@ -331,7 +403,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
                 }
             }
         }
-        Command::K8s { .. } => unreachable!("rendered above, before any module is opened"),
+        Command::K8s { .. } | Command::Operator { .. } => unreachable!("handled above, before any module is opened"),
         Command::Module(args) => module_command(&modules, &args)?,
     }
     Ok(())
@@ -356,6 +428,18 @@ mod tests {
         }
         assert!(checked(operator, &["plan"]).is_ok());
         assert!(checked(operator, &["--modules", "geocoder,tiles", "serve"]).is_ok());
+    }
+
+    #[test]
+    fn the_operator_runs_only_in_the_operator_mode() {
+        let err = checked("", &["operator"]).unwrap_err().to_string();
+        assert!(err.contains("mode = \"operator\""), "{err}");
+        assert!(checked("[deploy]
+mode = \"operator\"
+", &["operator"]).is_ok());
+        assert!(checked("[deploy]
+mode = \"operator\"
+", &["k8s", "install"]).is_ok());
     }
 
     #[test]

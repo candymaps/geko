@@ -36,7 +36,14 @@ jobs:
               'failure': '❌ The checks failed: see the run. It cannot be merged until they pass.',
               'not-needed': 'ℹ️ The checks are not needed: this pull request only changes documentation or what `ci/test.sh` does not build (`ci/affected.sh`). It can be merged without them.',
             };
-            if (!Number.isInteger(pr.number) || !(pr.result in texts) || pr.head !== run.head_sha) {
+            // What merging it changes of what the modules build against (ci.yml, `warnings`): a
+            // run from before the field has none.
+            const warningTexts = {
+              'contract': '⚠️ **Merging this pull request changes the contract** (`CONTRACT` in `module.rs`): every module of `ci/modules` must follow it, and the modules move to the new tag `sdk-<contract>`.',
+              'sdk': '⚠️ **Merging this pull request changes the SDK** (`crates/geko-module-sdk`): the tag `sdk-<contract>` moves on the push to `main`, and the modules build against the new one.',
+            };
+            const warnings = typeof pr.warnings === 'string' ? pr.warnings.split(' ').filter(Boolean) : [];
+            if (!Number.isInteger(pr.number) || !(pr.result in texts) || pr.head !== run.head_sha || !warnings.every(w => w in warningTexts)) {
               core.setFailed(`invalid pr.json: ${JSON.stringify(pr)}`);
               return;
             }
@@ -47,7 +54,8 @@ jobs:
               return;
             }
             const marker = '<!-- geko-checks -->';
-            const body = `${marker}\n${texts[pr.result]}\n\nCommit ${run.head_sha.slice(0, 7)}, [run](${run.html_url}).`;
+            const alerts = warnings.map(w => `\n\n${warningTexts[w]}`).join('');
+            const body = `${marker}\n${texts[pr.result]}${alerts}\n\nCommit ${run.head_sha.slice(0, 7)}, [run](${run.html_url}).`;
             const comments = await github.paginate(github.rest.issues.listComments, { ...context.repo, issue_number: pr.number });
             const mine = comments.find(c => c.user.type === 'Bot' && c.body.startsWith(marker));
             if (mine) {

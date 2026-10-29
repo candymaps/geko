@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # The operator mode, checked in the kind cluster that `make start-dev` makes when `[deploy] mode` is
-# "operator" (docs/OPERATOR_MODE_PLAN.md, step 8), once it is up: each module answers through the
-# gateway; a module that falls does not take the other with it; and each scales on its own.
+# "operator" (docs/OPERATOR_MODE_PLAN.md, step 10), once it is up: each module answers through the
+# gateway; the dashboard lists them as the cluster runs them; a module that falls does not take the
+# other with it; and the operator follows the config map: each module scales on its own, and one
+# turned off is removed.
 #
 #   GEKO_DEV_FOLLOW=0 make start-dev DEV_CONFIG=deploy/overlays/ci/geko.toml && ci/operator.sh
 #
@@ -16,6 +18,19 @@ SEARCH='/geocoder/v1/search?text=Luxembourg'
 k() { kubectl --context "$CONTEXT" -n geko "$@"; }
 code() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$BASE$1" || true; }
 fail() { echo "FAILED: $*" >&2; exit 1; }
+
+# The config map `geko` with the text of the file `$1` as its geko.toml: what the operator reads.
+set_config() { k create configmap geko --from-file=geko.toml="$1" --dry-run=client -o yaml | k apply -f - > /dev/null; }
+
+# The command `$@` succeeds within the `$1` seconds before it.
+eventually() {
+    local deadline=$(($(date +%s) + $1))
+    shift
+    until "$@" > /dev/null 2>&1; do
+        [ "$(date +%s)" -lt "$deadline" ] || return 1
+        sleep 2
+    done
+}
 
 # `what` is answered with the status `want` right now.
 expect() {
@@ -62,8 +77,24 @@ echo "ok   the geocoder answered all along"
 within /tiles/tilejson.json 200 300 || fail "tiles did not come back within 300 s"
 echo "ok   tiles is back"
 
-echo "==> the geocoder scales to 3 and tiles stays at 1"
-k scale deployment/geko-geocoder --replicas=3 > /dev/null
+conf=$(mktemp)
+edited=$(mktemp)
+trap 'rm -f "$conf" "$edited"; kill "${forward:-}" 2> /dev/null || true' EXIT
+k get configmap geko -o jsonpath='{.data.geko\.toml}' > "$conf"
+
+echo "==> the dashboard lists the modules as the cluster runs them"
+expect "the dashboard is served" / 200
+listed=$(curl -s --max-time 10 "$BASE/admin/api/modules")
+for module in geocoder tiles; do
+    echo "$listed" | grep -q "\"name\":\"$module\"" || fail "the dashboard does not list $module: $listed"
+done
+echo "$listed" | grep -q '"unavailable":"' && fail "the dashboard says a module is unavailable: $listed"
+echo "ok   both modules, available"
+
+echo "==> the geocoder scales to 3 through the configuration and tiles stays at 1"
+{ cat "$conf"; printf '\n[deploy.geocoder]\nreplicas = 3\n'; } > "$edited"
+set_config "$edited"
+eventually 120 test "$(k get deployment geko-geocoder -o jsonpath='{.spec.replicas}')" = 3 || fail "the operator did not scale the geocoder to 3"
 k rollout status deployment/geko-geocoder --timeout=300s
 ready=$(k get deployment geko-geocoder -o jsonpath='{.status.readyReplicas}')
 tiles=$(k get deployment geko-tiles -o jsonpath='{.spec.replicas}')
@@ -71,4 +102,23 @@ tiles=$(k get deployment geko-tiles -o jsonpath='{.spec.replicas}')
 [ "$tiles" = 1 ] || fail "tiles has $tiles replicas, not 1"
 expect "the geocoder, with 3 replicas" "$SEARCH" 200
 expect "tiles, with 1" /tiles/tilejson.json 200
+
+echo "==> by hand, the operator puts it back: kubectl scale does not stay"
+k scale deployment/geko-geocoder --replicas=1 > /dev/null
+eventually 120 test "$(k get deployment geko-geocoder -o jsonpath='{.spec.replicas}')" = 3 || fail "the operator did not restore the 3 replicas"
+echo "ok   3 replicas again"
+
+echo "==> tiles turned off in the configuration is removed, and the dashboard stops listing it"
+sed 's/^tiles *= *true/tiles = false/' "$conf" > "$edited"
+set_config "$edited"
+eventually 120 test -z "$(k get deployment geko-tiles --ignore-not-found -o name)" || fail "the operator did not delete tiles"
+eventually 60 sh -c "! curl -s --max-time 5 '$BASE/admin/api/modules' | grep -q '\"name\":\"tiles\"'" || fail "the dashboard still lists tiles"
+[ -n "$(k get persistentvolumeclaim geko-data --ignore-not-found -o name)" ] || fail "the volume with the bundles went with tiles"
+within "$SEARCH" 200 120 || fail "the geocoder stopped answering when tiles went"
+echo "ok   tiles removed, the volume and the geocoder stay"
+
+echo "==> tiles turned on again comes back with the bundle it had"
+set_config "$conf"
+within /tiles/tilejson.json 200 300 || fail "tiles did not come back within 300 s"
+echo "ok   tiles is back"
 echo "passed"
