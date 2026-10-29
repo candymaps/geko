@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "geko-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "geko-artifact"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ed25519-dalek",
  "geko-fetch",
@@ -815,7 +815,7 @@ dependencies = [
 
 [[package]]
 name = "geko-fetch"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "geko-module-sdk",
  "hex",
@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "geko-kube"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "geko-module-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "hex",
  "serde",
@@ -855,7 +855,7 @@ dependencies = [
 
 [[package]]
 name = "geko-server"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arc-swap",
  "axum",
