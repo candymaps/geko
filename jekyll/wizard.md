@@ -10,7 +10,7 @@ nav_order: 1
 The files to put geko in a cluster with the [operator mode]({% link kubernetes.md %}), from a few choices. Nothing is
 sent anywhere: the zip is written in your browser.
 
-<button type="button" class="btn btn-primary" id="wizard-open">Open the wizard</button>
+<button type="button" class="btn btn-primary wizard-btn" id="wizard-open">Open the wizard</button>
 
 ## What you get
 
@@ -147,6 +147,10 @@ To write `operator.yaml` yourself, run `geko k8s install` (see [CLI]({% link cli
   .wizard details label { margin-top: 0.5rem; }
   .wizard-errors { margin: 0; padding-left: 1.25rem; color: #d93025; font-size: 0.875rem; }
   .wizard footer { display: flex; justify-content: flex-end; gap: 0.5rem; }
+  /* The primary of the dashboard in place of the purple of the theme: its gradient and shadow, in green, also on hover and pressed. */
+  .wizard-btn.btn-primary, .wizard .btn-primary { background-color: #a4cc47; background-image: linear-gradient(#b3d85a, #a4cc47 55%, #9ac03f); color: #1b2a05; font-weight: 600; }
+  .wizard-btn.btn-primary:hover, .wizard-btn.btn-primary:focus, .wizard .btn-primary:hover, .wizard .btn-primary:focus { background-color: #94bb3a; background-image: linear-gradient(#a6cc4e, #94bb3a 55%, #89ae35); color: #1b2a05; }
+  .wizard-btn.btn-primary:active, .wizard .btn-primary:active { background-color: #89ae35; background-image: none; color: #1b2a05; }
 </style>
 <script src="{{ '/assets/js/geko-wizard.js' | relative_url }}"></script>
 <script src="{{ '/assets/js/geko-wizard-ui.js' | relative_url }}"></script>
