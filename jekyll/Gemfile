@@ -1,0 +1,5 @@
+source "https://rubygems.org"
+
+# The same gems as GitHub Pages, so that `bundle exec jekyll serve` renders what is published.
+gem "github-pages", group: :jekyll_plugins
+gem "webrick"

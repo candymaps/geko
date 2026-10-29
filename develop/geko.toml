@@ -22,3 +22,8 @@ keep_downloads  = true
 # The image serves on 0.0.0.0:8080 whatever [serve] listen says (the command of the Dockerfile).
 [serve]
 listen = "0.0.0.0:8080"
+
+# single: every module in the container of make start-dev. operator: one pod per module in a local
+# cluster (docs/OPERATOR_MODE_PLAN.md); make start-dev follows it once that step is done.
+[deploy]
+mode = "single"

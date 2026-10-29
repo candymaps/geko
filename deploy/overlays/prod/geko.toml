@@ -1,0 +1,16 @@
+# An example geko.toml for a cluster: change the scope, and the sources in geko-<module>.toml
+# files beside it (add them to the files of the config map in kustomization.yaml).
+[modules]
+geocoder = true
+tiles    = true
+
+[[scope]]
+country = "ES"
+
+[data]
+accept_licenses = true
+keep_downloads  = true
+max_age_days    = 30
+
+[deploy]
+mode = "operator"

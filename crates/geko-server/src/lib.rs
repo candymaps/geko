@@ -1,10 +1,13 @@
 //! What geko serves for every module (docs/MODULES_PLAN.md): `/health`, `/metrics`,
 //! `/v1/attribution`, `/openapi.yaml` and `/docs`, API keys, CORS and the rate limit, the bundle
 //! that every module loads and keeps watching, and the routes of each active module, mounted under
-//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio.
+//! its name (`/geocoder/v1/search`). Only `geko serve` (and `up`) use it, and tokio; the operator mode
+//! also serves the dashboard alone (`serve_dashboard`).
 
 mod access;
+mod dashboard;
 mod metrics;
+mod ui;
 
 use std::collections::HashSet;
 use std::net::SocketAddr;
@@ -25,6 +28,7 @@ use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Mod
 use serde_json::json;
 
 pub use access::Access;
+pub use dashboard::{ModuleStatus, PodAnswer, Pods, Statuses, serve as serve_dashboard};
 
 /// The module behind a mount, which a bundle built by another version of it switches to that
 /// version (`Reopen`); requests in flight finish on the one they started on.
@@ -122,11 +126,24 @@ pub struct BundleManager {
     loaded: ArcSwapOption<(String, Vec<LicenseNotice>)>,
     /// Why the last bundle published could not be loaded, for `/health`.
     error: ArcSwapOption<String>,
+    /// The modules that the loaded bundle has no part of, which serve nothing: for `/ready`.
+    waiting: ArcSwap<Vec<String>>,
 }
 
 impl BundleManager {
     pub fn new(source: BundleSource, modules: Vec<Mounted>) -> Self {
-        Self { source, modules, loaded: ArcSwapOption::empty(), error: ArcSwapOption::empty() }
+        Self { source, modules, loaded: ArcSwapOption::empty(), error: ArcSwapOption::empty(), waiting: ArcSwap::from_pointee(Vec::new()) }
+    }
+
+    /// Why this server cannot answer yet, for `/ready`: no bundle loaded, a module without its part of
+    /// it, or a module that says it is not available. Empty when it can.
+    pub fn waiting_for(&self) -> Vec<String> {
+        if self.loaded.load().is_none() {
+            return vec!["a bundle".to_owned()];
+        }
+        let mut waiting: Vec<String> = self.waiting.load().iter().map(|m| format!("the part of {m} in the bundle")).collect();
+        waiting.extend(self.modules.iter().filter_map(|m| m.module.unavailable().map(|why| format!("{}: {why}", m.name()))));
+        waiting
     }
 
     pub fn error(&self) -> Option<String> {
@@ -167,9 +184,11 @@ impl BundleManager {
         let root = self.source.dir.join(&version);
         let manifest = BundleManifest::read(&root)?;
         let started = Instant::now();
+        let mut without_part = Vec::new();
         for m in &self.modules {
             let Some(part) = manifest.module(&m.description.name) else {
                 tracing::warn!(module = m.name(), %version, "the bundle has no part of this module: it serves nothing");
+                without_part.push(m.name().to_owned());
                 continue;
             };
             if part.contract != m.description.contract {
@@ -198,6 +217,7 @@ impl BundleManager {
             m.module.load(&view)?;
         }
         tracing::info!(%version, elapsed = ?started.elapsed(), "bundle loaded");
+        self.waiting.store(Arc::new(without_part));
         self.loaded.store(Some(Arc::new((version, manifest.licenses))));
         Ok(true)
     }
@@ -223,8 +243,6 @@ impl BundleManager {
 /// those of the modules.
 const OPENAPI: &str = include_str!("../../../openapi.yaml");
 const DOCS: &str = include_str!("docs.html");
-/// `/`: a map with what the active modules offer (the geocoder's search), through their API.
-const DEMO: &str = include_str!("demo.html");
 
 /// Licenses and attributions of the served data (PROJECT.md §6): the sources of the bundle, whom
 /// to ask for the code that reproduces it, and what each module adds under its name.
@@ -241,6 +259,11 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
         }
     }
     body
+}
+
+/// `/admin/api/modules`: the active modules, so the dashboard offers a tab for each.
+fn module_list(modules: &[Mounted]) -> serde_json::Value {
+    modules.iter().map(|m| json!({ "name": m.name(), "version": m.slot.version(), "unavailable": m.module.unavailable() })).collect()
 }
 
 /// `/docs`: Swagger UI over the reference of geko and those of the modules.
@@ -344,6 +367,7 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
     let names: Vec<String> = modules.iter().map(|m| m.name().to_owned()).collect();
     let (attribution_bundles, attribution_modules) = (bundles.clone(), modules.to_vec());
     let docs = docs(modules);
+    let listed = modules.to_vec();
     let shared_routes = Router::new()
         .route(
             "/v1/attribution",
@@ -354,7 +378,15 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
         )
         .route("/openapi.yaml", get(|| async { ([(header::CONTENT_TYPE, "application/yaml")], OPENAPI) }))
         .route("/docs", get(move || async move { axum::response::Html(docs) }))
-        .route("/", get(|| async { axum::response::Html(DEMO) }));
+        .route(
+            "/admin/api/modules",
+            get(move || {
+                let body = module_list(&listed);
+                async move { Json(body) }
+            }),
+        );
+    // `/`: the dashboard (ui/), a map with what the active modules offer, through their API.
+    let shared_routes = ui::mount(shared_routes);
     let metrics = Arc::new(metrics::Metrics::default());
     let version = {
         let bundles = bundles.clone();
@@ -374,6 +406,22 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error, "modules_unavailable": unavailable })) }
         }),
     );
+    // `/health` says the process is alive, from the start (the health check of the image, while it
+    // builds); `/ready` says it can answer: the probe that keeps a pod of the operator mode out of
+    // the balancer until it has loaded its bundle.
+    let (ready_bundles, ready_modules) = (bundles.clone(), modules.to_vec());
+    let health = health.route(
+        "/ready",
+        get(move || {
+            let waiting: Vec<String> = match &ready_bundles {
+                Some(b) => b.waiting_for(),
+                None => ready_modules.iter().filter_map(|m| m.module.unavailable().map(|why| format!("{}: {why}", m.name()))).collect(),
+            };
+            let version = ready_bundles.as_ref().and_then(|b| b.version());
+            let status = if waiting.is_empty() { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+            async move { (status, Json(json!({ "ready": status == StatusCode::OK, "bundle": version, "waiting": waiting }))) }
+        }),
+    );
     let tracked = health.merge(module_routes(modules)).route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
     let exposed = Arc::clone(&metrics);
     let mounted = modules.to_vec();
@@ -387,7 +435,9 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             async move { ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], text) }
         }),
     );
-    let guard = access::Guard::new(access, public_paths(modules));
+    let mut public = public_paths(modules);
+    public.extend(ui::paths().map(str::to_owned));
+    let guard = access::Guard::new(access, public);
     // A panic in one request becomes a 500 for that request only.
     tracked
         .merge(metrics_route)
@@ -511,9 +561,6 @@ mod tests {
         assert_eq!(body["body"], "payload");
         assert_eq!(get_json(&app, "/v1/echo/x").await.0, StatusCode::NOT_FOUND, "only under its name");
 
-        let res = app.clone().oneshot(axum::http::Request::get("/").body(Body::empty()).unwrap()).await.unwrap();
-        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
-        assert!(page.starts_with("<!doctype html>") && page.contains("/geocoder/v1/"), "the demo of the host");
         let res = app.oneshot(axum::http::Request::get("/fake").body(Body::empty()).unwrap()).await.unwrap();
         assert_eq!(res.headers()[header::LOCATION], "/fake/");
     }
@@ -530,6 +577,69 @@ mod tests {
         let res = app.oneshot(axum::http::Request::get("/docs").body(Body::empty()).unwrap()).await.unwrap();
         let page = String::from_utf8(to_bytes(res.into_body(), 1 << 16).await.unwrap().to_vec()).unwrap();
         assert!(page.starts_with("<!doctype html>") && page.contains("swagger-ui") && page.contains(r#""url":"/fake/openapi.yaml""#), "{page}");
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_is_served_at_the_root_without_a_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        let request = |encoding: &str| axum::http::Request::get("/").header(header::ACCEPT_ENCODING, encoding).body(Body::empty()).unwrap();
+
+        let res = app.clone().oneshot(request("identity")).await.unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert!(res.headers()[header::CONTENT_TYPE].to_str().unwrap().starts_with("text/html"));
+        assert!(!res.headers().contains_key(header::CONTENT_ENCODING));
+        let page = String::from_utf8(to_bytes(res.into_body(), 1 << 20).await.unwrap().to_vec()).unwrap();
+        assert!(page.starts_with("<!doctype html>"), "{page}");
+
+        let res = app.oneshot(request("gzip")).await.unwrap();
+        // Without `ui/dist` at compile time the page that says so is small and not compressed.
+        if res.headers().contains_key(header::CONTENT_ENCODING) {
+            assert_eq!(&to_bytes(res.into_body(), 1 << 20).await.unwrap()[..2], &[0x1f, 0x8b]);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_dashboard_lists_the_active_modules_behind_the_key() {
+        let app = app(Access { api_keys: vec!["k".into()], ..Default::default() });
+        assert_eq!(get_json(&app, "/admin/api/modules").await.0, StatusCode::UNAUTHORIZED);
+        let (status, body) = get_json(&app, "/admin/api/modules?api_key=k").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!([{ "name": "fake", "version": "1.0.0", "unavailable": null }]));
+    }
+
+    #[tokio::test]
+    async fn ready_only_once_the_bundle_has_the_part_of_every_module() {
+        let dir = tempfile::tempdir().unwrap();
+        let mounted = Mounted::new(Arc::new(Fake::default()));
+        let manager = Arc::new(BundleManager::new(
+            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: None },
+            vec![mounted.clone()],
+        ));
+        let app = router(&[mounted], Some(Arc::clone(&manager)), Access { api_keys: vec!["k".into()], ..Default::default() }, None);
+        let (status, body) = get_json(&app, "/ready").await;
+        assert_eq!((status, &body["ready"]), (StatusCode::SERVICE_UNAVAILABLE, &json!(false)), "no bundle yet, and no key needed");
+        assert_eq!(body["waiting"], json!(["a bundle"]));
+        assert_eq!(get_json(&app, "/health").await.0, StatusCode::OK, "alive all the same");
+
+        // A bundle that has no part of the module: loaded, but it would serve nothing.
+        let root = dir.path().join("v1");
+        std::fs::create_dir_all(&root).unwrap();
+        BundleManifest { format: FORMAT, version: "v1".into(), created_unix: 0, modules: vec![], licenses: vec![], artifacts: vec![] }.write(&root).unwrap();
+        std::fs::write(dir.path().join("current"), "v1").unwrap();
+        assert!(manager.refresh().unwrap());
+        let (status, body) = get_json(&app, "/ready").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["waiting"], json!(["the part of fake in the bundle"]));
+
+        publish(dir.path(), "v2", module::CONTRACT);
+        assert!(manager.refresh().unwrap());
+        let (status, body) = get_json(&app, "/ready").await;
+        assert_eq!((status, &body["ready"], &body["bundle"]), (StatusCode::OK, &json!(true), &json!("v2")));
+    }
+
+    #[tokio::test]
+    async fn a_server_without_bundles_is_ready() {
+        assert_eq!(get_json(&app(Access::default()), "/ready").await.0, StatusCode::OK);
     }
 
     #[tokio::test]

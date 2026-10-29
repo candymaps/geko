@@ -1,7 +1,9 @@
 # The checks of every pull request. On a pull request (or by hand), `test` finds whether it changes
-# what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it. It is the
+# what the checks build (ci/affected.sh) and, if it does, runs the whole ci/test.sh on it; if it
+# changes the contract or ci/modules, it also checks that every module is published for it. It is the
 # status that the protection of main and dev requires: it always runs, and passes when the checks
-# passed or were not needed. pr-comment.yml says on the pull request which of the two it was. What
+# passed or were not needed. A pull request from dev into main that takes dev as it is runs none: dev
+# already passed them. pr-comment.yml says on the pull request which of the two it was. What
 # reaches main, already checked, is published by publish.yml. The modules check and publish
 # themselves, each in its repository.
 name: ci
@@ -24,13 +26,36 @@ jobs:
   # request (this run, from a fork, may not).
   test:
     runs-on: ubuntu-latest
+    # The packages of the modules, which ci/modules.sh check reads.
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 2
+      # A pull request from dev (of this repository) into main whose merge is dev as it is: dev only
+      # takes pull requests that passed these checks with the branch up to date, so its head already
+      # passed them. If main has something dev lacks (a hotfix), the merge differs and they run.
+      - id: release
+        # Names that whoever opens the pull request chooses: never in the script itself.
+        env:
+          BASE: ${{ github.base_ref }}
+          HEAD_BRANCH: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          checked=0
+          if [ "$BASE" = main ] && [ "$HEAD_BRANCH" = dev ] && [ "$HEAD_REPO" = "$REPO" ] \
+            && [ "$(git rev-parse 'HEAD^{tree}')" = "$(git rev-parse 'HEAD^2^{tree}')" ]; then
+            checked=1
+          fi
+          echo "checked=$checked" >> "$GITHUB_OUTPUT"
+          echo "checked on dev $checked"
       # Whether the pull request changes what the checks build: the diff of its merge commit with
       # the base branch (its first parent). A run by hand checks everything.
       - id: affected
+        if: steps.release.outputs.checked == '0'
         run: |
           code=1
           if [ "${{ github.event_name }}" = pull_request ] && [ -z "$(ci/affected.sh HEAD^1 HEAD)" ]; then
@@ -45,16 +70,51 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - if: steps.affected.outputs.code == '1'
         run: ci/test.sh
+      # A pull request that changes the contract, or the modules of ci/modules, needs every module
+      # of the list published for its contract (ci/modules.sh check): neither dev nor main takes a
+      # contract that a module does not speak yet. The modules follow the commit of the pull request
+      # (rev in their Cargo.toml) and publish; then its checks run again. Other pull requests do not
+      # depend on what is in the registry. A run by hand checks.
+      - id: modules
+        run: |
+          check=1
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            contract() { git show "$1:crates/geko-module-sdk/src/module.rs" | sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p'; }
+            check=0
+            [ "$(contract HEAD^1)" = "$(contract HEAD)" ] || check=1
+            git diff --quiet HEAD^1 HEAD -- ci/modules || check=1
+          fi
+          echo "check=$check" >> "$GITHUB_OUTPUT"
+          echo "check $check"
+      - if: steps.modules.outputs.check == '1'
+        uses: oras-project/setup-oras@v1
+      - if: steps.modules.outputs.check == '1'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          ci/modules.sh check
+      # What merging the pull request changes of what the modules build against, for pr-comment.yml
+      # to warn of it, whether or not the checks ran: `contract` (CONTRACT of the SDK) and `sdk`
+      # (anything in its crate, the contract included).
+      - id: warnings
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          contract() { git show "$1:crates/geko-module-sdk/src/module.rs" | sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p'; }
+          warnings=
+          [ "$(contract HEAD^1)" = "$(contract HEAD)" ] || warnings="$warnings contract"
+          git diff --quiet HEAD^1 HEAD -- crates/geko-module-sdk || warnings="$warnings sdk"
+          echo "warnings=${warnings# }" >> "$GITHUB_OUTPUT"
+          echo "warnings: ${warnings:-none}"
       - if: always() && github.event_name == 'pull_request'
         run: |
           result=failure
           if [ "${{ job.status }}" = success ]; then
             result=not-needed
             [ "${{ steps.affected.outputs.code }}" = 1 ] && result=passed
+            [ "${{ steps.release.outputs.checked }}" = 1 ] && result=checked-on-dev
           fi
           echo "checks: $result"
-          printf '{"number": %s, "head": "%s", "result": "%s"}\n' \
-            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" > pr.json
+          printf '{"number": %s, "head": "%s", "result": "%s", "warnings": "%s"}\n' \
+            "${{ github.event.pull_request.number }}" "${{ github.event.pull_request.head.sha }}" "$result" "${{ steps.warnings.outputs.warnings }}" > pr.json
       - if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:

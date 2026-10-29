@@ -1,0 +1,13 @@
+[package]
+name = "geko-kube"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+futures = "0.3"
+k8s-openapi = { version = "0.28", features = ["v1_32"] }
+kube = { version = "4.2", default-features = false, features = ["client", "rustls-tls", "ring", "runtime"] }
+serde_json.workspace = true

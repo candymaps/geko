@@ -1,0 +1,6 @@
+# The modules that must be published for the contract of geko (ci/modules.sh check): in the checks
+# of a pull request that changes the contract or this list (ci.yml), and before every image and
+# release (publish.yml). One per line, the name of [modules] in geko.toml, published in
+# ghcr.io/candymaps/geko-<module>.
+geocoder
+tiles

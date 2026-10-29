@@ -21,7 +21,8 @@
 A modular, multi-country geospatial engine. Each service is a module, enabled in `geko.toml`, on top of the same data:
 
 - **Geocoding** (available, [geko-geocoder](https://github.com/candymaps/geko-geocoder)): turns addresses and place names into coordinates (search and autocomplete), and coordinates into addresses (reverse).
-- **Vector tiles** ([geko-tiles](https://github.com/candymaps/geko-tiles), a skeleton for now), **routing…** (planned): new modules that plug in without changing the others.
+- **Vector tiles** (available, [geko-tiles](https://github.com/candymaps/geko-tiles)): vector tiles of the scope, with the Protomaps styles, their fonts and sprites.
+- **Routing…** (planned): new modules that plug in without changing the others.
 
 They all share the same foundation:
 
@@ -40,7 +41,8 @@ All you need is Docker.
 
 ```toml
 [modules]
-geocoder = true          # geocoding; more modules (tiles, routing…) are on the way
+geocoder = true          # geocoding
+tiles    = true          # vector tiles; more modules (routing…) are on the way
 
 [[scope]]
 country = "ES"            # ISO 3166-1; one [[scope]] per country (LU…)
@@ -65,7 +67,7 @@ To change the options of a module, mount its file too, beside it (`-v "$PWD/geko
 
 The first time, it downloads the data for those countries, builds the indexes and serves them (it answers 503 until then): about 2 minutes for Luxembourg, around an hour for all of Spain (about 8 GB of disk while building and 5 GB afterwards, and 3 GB of memory). Follow it with `docker logs -f geko`: while it builds, one line every 2 seconds with how far it has gone (with `GEKO_VERBOSE=1`, `-e GEKO_VERBOSE=1` in Docker, or `geko --verbose`, every step instead). Later starts reuse the `geko-data` volume and only rebuild what changed.
 
-**3. Use it.** The demo page, a map with the search of the geocoder, is at <http://localhost:8080/>. Each module serves its routes under its name: the geocoder under `/geocoder/`, with its API in [its README](https://github.com/candymaps/geko-geocoder#usage). Common to all of them: `/health`, `/metrics`, the licenses and attribution of the served data at `/v1/attribution`, and the API of the host and of every active module, browsable with Swagger UI, at `/docs` (the host's, [openapi.yaml](openapi.yaml), also at `/openapi.yaml`).
+**3. Use it.** The dashboard, a map with the search of the geocoder and a tab for each active module, is at <http://localhost:8080/>. Each module serves its routes under its name: the geocoder under `/geocoder/`, with its API in [its README](https://github.com/candymaps/geko-geocoder#usage). Common to all of them: `/health`, `/metrics`, the licenses and attribution of the served data at `/v1/attribution`, and the API of the host and of every active module, browsable with Swagger UI, at `/docs` (the host's, [openapi.yaml](openapi.yaml), also at `/openapi.yaml`).
 
 To update: `docker pull ghcr.io/candymaps/geko`, remove the container and start it again with the same command; the data stays in the volume.
 
@@ -81,7 +83,7 @@ Every section and option of geko itself (the host), with its default value unles
 # built the bundle it serves, and downloads it if missing.
 [modules]
 geocoder = true
-tiles    = false                    # still a skeleton: it serves nothing yet
+tiles    = true
 
 # [modules.geocoder]                # instead of `geocoder = true` above
 # version  = "1.4.2"                # default: the newest of the contract of this geko
@@ -111,7 +113,27 @@ rate_limit_per_s       = 0          # requests per second from one client addres
 rate_limit_burst       = 0          # burst above that rate (0: twice the rate)
 bundles_url            = ""         # HTTP address of bundles published on another machine; each reload pulls only what changed
 attribution_contact    = ""         # where to ask for the code of the derivative database (ODbL 4.6), in /v1/attribution
+
+# How geko is deployed (docs/OPERATOR_MODE_PLAN.md). The modules never read it.
+[deploy]
+mode = "single"                     # single: every module in one process, wherever it runs | operator: one deployment per module in Kubernetes
+                                    # (not implemented yet: with it, `geko serve|build|up` ask for `--module <name>`, one module per process)
+
+# [deploy.geocoder]                 # only the operator mode reads these
+# replicas = 2                      # default 1
+# cpu      = "500m"                 # Kubernetes quantities, as the pods ask for them
+# memory   = "4Gi"
 ```
+
+### One module per process
+
+`geko serve --module geocoder` (`--module` is an alias of `--modules`) serves only the routes of that module, and `geko build --module geocoder` builds only its part. The bundle that build publishes keeps what the current one has of the other modules, so each module can build in a job of its own, with its own resources; publications into the same bundles directory wait for each other (`.publish.lock`). A build with no `--module` publishes exactly the modules that are active, as before.
+
+Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
+
+To develop it as it runs in Kubernetes, put `[deploy] mode = "operator"` in the configuration of `make start-dev` (`develop/geko.toml`, or `DEV_CONFIG=…`): the same command then makes a local kind cluster (`geko-dev`) if there is none, loads the image into it, applies the manifests that `geko k8s render` writes from that configuration (a pod per module, a build job per module, one volume for the data, `deploy/`), builds each module one after the other, and serves it all at the same `http://localhost:8080/`. `make stop-dev` deletes what runs and keeps the cluster and its volume; `make stop-dev PURGE=1` deletes the cluster. It needs `docker`, `kind` and `kubectl`, and says so if one is missing. The `operator` workflow runs this on Luxembourg, and `ci/operator.sh` checks that a module that falls does not take the other with it and that each scales on its own.
+
+Without a cluster, `develop/compose-split.yaml` runs it as the cluster would: a build job per module, one after the other, a server per module and an nginx that sends each path to its module (`GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build`, with the same variables as `make start-dev`).
 
 ## License
 

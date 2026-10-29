@@ -47,17 +47,33 @@ endef
 DEV_PORT    ?= 8080
 DEV_MODULES_DIR ?= $(abspath ..)
 DEV_CONFIG  ?= develop/geko.toml
-DEV_MODULES ?= $(shell awk '/^\[/ { on = ($$1 == "[modules]") } on && $$2 == "=" && $$3 == "true" { print $$1 }' $(DEV_CONFIG) | paste -sd, -)
+DEV_MODULES ?= $(shell awk '/^\[/ { on = ($$1 == "[modules]") } on && $$2 == "=" && $$3 == "true" { print $$1 }' "$(DEV_CONFIG)" | paste -sd, -)
+# How that configuration deploys, `[deploy] mode`: single (the default) runs everything in the one
+# container of develop/compose.yaml; operator, a process per module in a local cluster (kind), as
+# in Kubernetes (docs/OPERATOR_MODE_PLAN.md): develop/k8s-dev.sh.
+DEV_DEPLOY_MODE ?= $(or $(shell awk '/^\[/ { on = ($$1 == "[deploy]") } on && $$1 == "mode" && $$2 == "=" { gsub(/"/, "", $$3); print $$3 }' "$(DEV_CONFIG)"),single)
+# The Planetiler profile of the tiles module (its jar and styles), which its ci/profile.sh builds
+# in Docker and the module is compiled with.
+DEV_TILES_PROFILE ?= $(CARGO_TARGET_DIR)/geko-dev-tiles-profile
 DEV_COMPOSE := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PORT) GEKO_DEV_MODULES=$(DEV_MODULES) GEKO_DEV_MODULES_DIR="$(DEV_MODULES_DIR)" \
+               GEKO_DEV_TILES_PROFILE="$(DEV_TILES_PROFILE)" \
                GEKO_DEV_VERSION=$(VERSION)-$(COMMIT)$(DIRTY) docker compose -f develop/compose.yaml
+DEV_K8S := GEKO_DEV_CONFIG="$(abspath $(DEV_CONFIG))" GEKO_DEV_PORT=$(DEV_PORT) GEKO_DEV_MODULES=$(DEV_MODULES) develop/k8s-dev.sh
 
-.PHONY: help bin install serve up data image start-dev stop-dev release test test-changed
+# The dashboard that geko embeds (ci/ui.sh), rebuilt only when what it is made of changes.
+UI_SOURCES := $(shell find ui/src -type f) ui/index.html ui/package.json ui/package-lock.json ui/tsconfig.json ui/vite.config.ts
+ui/dist/index.html: $(UI_SOURCES)
+	ci/ui.sh
+
+.PHONY: help ui bin install serve up data image start-dev stop-dev release test test-changed
 
 help: ## This list
 	@grep -E "^[a-z-]+:.*## " $(MAKEFILE_LIST) | awk -F ":.*## " '{ printf "  make %-10s %s\n", $$1, $$2 }'
 	@echo "  Variables: LISTEN=$(LISTEN) IMAGE=$(IMAGE) REGISTRY=$(REGISTRY)"
 
-bin: ## Compile geko in release
+ui: ui/dist/index.html ## Compile the dashboard (ui/) in Docker, for geko to embed it
+
+bin: ui/dist/index.html ## Compile geko in release, with the dashboard
 	cargo build --release -p geko-app
 
 install: bin ## Install geko, /etc/geko/geko.toml (that of make start-dev, if there is none) and /var/lib/geko
@@ -65,7 +81,7 @@ install: bin ## Install geko, /etc/geko/geko.toml (that of make start-dev, if th
 	[ -f /etc/geko/geko.toml ] || sudo install -D -m 644 develop/geko.toml /etc/geko/geko.toml
 	[ -d /var/lib/geko ] || sudo install -d -o $$(id -un) -g $$(id -gn) /var/lib/geko
 
-serve: install ## Serve the published bundle on LISTEN (the demo page is at /)
+serve: install ## Serve the published bundle on LISTEN (the dashboard is at /)
 	$(GEKO) serve --listen $(LISTEN)
 
 up: install ## Serve, and build in the background what the configuration asks for (now and every max_age_days)
@@ -74,22 +90,38 @@ up: install ## Serve, and build in the background what the configuration asks fo
 data: install ## Download and build what the configuration asks for
 	$(GEKO) build
 
-image: ## Docker image IMAGE with geko alone, from a local release build (docker build compiles it instead): it downloads its modules
+image: ui/dist/index.html ## Docker image IMAGE with geko alone, from a local release build (docker build compiles it instead): it downloads its modules
 	cargo build --release -p geko-app
 	@$(call glibc,$(BIN))
 	rm -rf $(CARGO_TARGET_DIR)/image && mkdir -p $(CARGO_TARGET_DIR)/image
 	cp $(BIN) $(CARGO_TARGET_DIR)/image/geko
 	BUILDX_GIT_INFO=false docker build --build-context binary=$(CARGO_TARGET_DIR)/image --build-arg VERSION=$(VERSION) --build-arg REVISION=$(COMMIT)$(DIRTY) -t $(IMAGE) .
 
-start-dev: ## Build geko and DEV_MODULES (their repositories in DEV_MODULES_DIR, with the SDK of this tree) inside Docker and (re)create the container of develop/compose.yaml with DEV_CONFIG
+start-dev: ## Build geko and DEV_MODULES (their repositories in DEV_MODULES_DIR, with the SDK of this tree) inside Docker and run them with DEV_CONFIG: one container (single), or a pod per module in a kind cluster ([deploy] mode = "operator")
 	@[ -n "$(DEV_MODULES)" ] || { echo "no module enabled in $(DEV_CONFIG): DEV_MODULES=geocoder,…" >&2; exit 1; }
+ifeq ($(DEV_DEPLOY_MODE),operator)
+	@$(DEV_K8S) check
+	@mkdir -p "$(DEV_TILES_PROFILE)"
+	@case ",$(DEV_MODULES)," in *,tiles,*) "$(DEV_MODULES_DIR)/geko-tiles/ci/profile.sh" "$(DEV_TILES_PROFILE)" ;; esac
+	$(DEV_COMPOSE) build
+	@$(DEV_K8S) up
+else ifeq ($(DEV_DEPLOY_MODE),single)
 	@docker rm -f geko-dev > /dev/null 2>&1 || true
+	@mkdir -p "$(DEV_TILES_PROFILE)"
+	@case ",$(DEV_MODULES)," in *,tiles,*) "$(DEV_MODULES_DIR)/geko-tiles/ci/profile.sh" "$(DEV_TILES_PROFILE)" ;; esac
 	$(DEV_COMPOSE) up -d --build
-	@echo "geko-dev ($(DEV_MODULES)) builds, then serves http://localhost:$(DEV_PORT)/ (demo) and /docs (API). Its log follows; Ctrl-C leaves it running."
+	@echo "geko-dev ($(DEV_MODULES)) builds, then serves http://localhost:$(DEV_PORT)/ (dashboard) and /docs (API). Its log follows; Ctrl-C leaves it running."
 	$(DEV_COMPOSE) logs -f
+else
+	@echo "[deploy] mode = \"$(DEV_DEPLOY_MODE)\" in $(DEV_CONFIG): it is single or operator" >&2; exit 1
+endif
 
-stop-dev: ## Stop the container of make start-dev, keeping its volume (geko-dev_data)
+stop-dev: ## Stop what make start-dev runs, keeping its data: the volume geko-dev_data, or the cluster and its volume (PURGE=1 deletes the cluster)
+ifeq ($(DEV_DEPLOY_MODE),operator)
+	@$(DEV_K8S) down $(if $(PURGE),--purge)
+else
 	$(DEV_COMPOSE) down
+endif
 
 release: ## Compile, make the image and push it to REGISTRY (needs a clean tree and docker login ghcr.io)
 	@git diff --quiet HEAD || { echo "uncommitted changes: the image would not be that of $(COMMIT)" >&2; exit 1; }

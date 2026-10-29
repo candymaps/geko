@@ -1,0 +1,17 @@
+# The geko.toml of the local cluster (make start-dev with [deploy] mode = "operator"): the Balearic
+# Islands, as develop/geko.toml. The downloads are kept: the builds of the modules share raw/, and
+# the one that runs second would otherwise download again what the first removed.
+[modules]
+geocoder = true
+tiles    = true
+
+[[scope]]
+country = "ES"
+regions = ["ES-PM"]
+
+[data]
+accept_licenses = true
+keep_downloads  = true
+
+[deploy]
+mode = "operator"

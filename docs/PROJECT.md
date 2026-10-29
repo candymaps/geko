@@ -7,7 +7,7 @@ geko es un motor geoespacial modular y multipaís. Este repositorio es **el host
 | Módulo | Repositorio | Estado |
 |---|---|---|
 | `geocoder` | [candymaps/geko-geocoder](https://github.com/candymaps/geko-geocoder) | Búsqueda, autocompletado e inversa, con los packs de país; su especificación, en su `docs/PROJECT.md` |
-| `tiles` | [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles) | Esqueleto: responde 503 |
+| `tiles` | [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles) | Teselas vectoriales del ámbito (Planetiler y el perfil de Protomaps), con sus estilos, fuentes y sprites; su plan, en su `docs/MODULE_PLAN.md` |
 
 Todo el ciclo es **automático**: se declaran en `geko.toml` el ámbito y los módulos, y geko baja los módulos, les pide que descarguen y generen lo suyo para el ámbito, publica el bundle y lo sirve (sección 7).
 
@@ -96,7 +96,7 @@ La configuración está siempre en `/etc/geko/geko.toml`, con la de cada módulo
 ```toml
 [modules]
 geocoder = true                 # o una tabla: { enabled, config, version, registry }
-tiles    = false
+tiles    = true
 
 [[scope]]
 country = "ES"
@@ -181,7 +181,7 @@ Los ficheros de un bundle bajo un directorio `hot/` se fijan en RAM al cargarlos
 Las rutas del host están en [openapi.yaml](../openapi.yaml), servida en `/openapi.yaml`; las de cada módulo, en el suyo (`openapi` de su `describe`). `/docs` (Swagger UI) las muestra todas.
 
 ```
-GET  /                  página de demostración (lo que ofrecen los módulos activos)
+GET  /                  el dashboard (ui/): el mapa y una pestaña por cada módulo activo; incrustado en el binario
 GET  /v1/attribution
 GET  /openapi.yaml, /docs
 GET  /health            módulos, versiones y los que no están disponibles (modules_unavailable)
@@ -235,7 +235,7 @@ geko/
 
 1. **Host y módulos** (docs/MODULES_PLAN.md): pasos 1–6 *(hechos; quedan las semanas de uso real del paso 6)*; paso 7, los repositorios aparte *(hecho, 2026-10-22)*.
 2. **Operación:** `BundleStore` con S3 y enrutador entre nodos; regeneración programada con diffs *(del geocoder)*.
-3. **Más módulos:** teselas (`tiles`), enrutamiento.
+3. **Más módulos:** teselas (`tiles`) *(publicado, 2026-10-26)*; enrutamiento.
 
 ## 15. Stack
 
@@ -266,7 +266,8 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 
 - **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
-- **Servicio:** página de demostración en `/`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
+- **Teselas** (2026-10-26): `tiles` publicado (`0.1.0`), en `ci/modules` y activo por defecto, como el geocoder.
+- **Servicio:** dashboard en `/` (`ui/`, incrustado en el binario) y `GET /admin/api/modules`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
 ## 19. Comprobaciones
 
@@ -305,6 +306,6 @@ En Linux y macOS, `make <objetivo>`; en Windows, `make.cmd`, que lo ejecuta dent
 - `make serve`, `make up` y `make data`: sirven, generan y sirven, o solo generan, con `/etc/geko/geko.toml` (`make install`, con `sudo`, instala antes el binario, `develop/geko.toml` si no hay ninguno, y `/var/lib/geko`). Sin `GEKO_MODULES`, bajan los módulos publicados.
 - `make test` y `make test-changed`: las comprobaciones de `ci/test.sh`.
 - `make image`: la imagen publicable con el binario de la última compilación. Se niega si el binario pide una glibc más nueva que la de la imagen (2.36).
-- `make start-dev` (`develop/compose.yaml`, proyecto `geko-dev`): compila dentro de Docker (objetivo `local` del `Dockerfile`) geko y los módulos activos en su configuración, de sus repositorios junto a este (`../geko-<módulo>`; `DEV_MODULES_DIR=` los busca en otra carpeta), contra la SDK de este árbol, cambios sin commit incluidos, y vuelve a crear el contenedor. Los módulos van dentro de la imagen (`GEKO_MODULES`) y nunca se descargan; los packs de país son los del repositorio del geocoder. Sirve en `http://localhost:8080` (`DEV_PORT=`), con `develop/geko.toml` (`DEV_CONFIG=`). `DEV_MODULES=geocoder,tiles` fuerza qué módulos compilar. Sus datos van al volumen `geko-dev_data`; `make stop-dev` lo para.
+- `make start-dev` (`develop/compose.yaml`, proyecto `geko-dev`): compila dentro de Docker (objetivo `local` del `Dockerfile`) geko y los módulos activos en su configuración, de sus repositorios junto a este (`../geko-<módulo>`; `DEV_MODULES_DIR=` los busca en otra carpeta), contra la SDK de este árbol, cambios sin commit incluidos, y vuelve a crear el contenedor. Los módulos van dentro de la imagen (`GEKO_MODULES`) y nunca se descargan; los packs de país son los del repositorio del geocoder. Sirve en `http://localhost:8080` (`DEV_PORT=`), con `develop/geko.toml` (`DEV_CONFIG=`). `DEV_MODULES=geocoder,tiles` fuerza qué módulos compilar. Con `tiles`, antes construye su perfil de Planetiler con `ci/profile.sh` de su repositorio (en Docker, en `DEV_TILES_PROFILE=`) y compila el módulo con él. La página de `/` pinta entonces el mapa con las teselas propias (`/tiles/…`), con el estilo claro u oscuro y el idioma del navegador; sin `tiles`, o mientras no ha generado su bundle, con el de OpenStreetMap. Sus datos van al volumen `geko-dev_data`; `make stop-dev` lo para.
 - `make release`: compila, hace la imagen y la sube a `ghcr.io/candymaps/geko` (solo con todo en commit, tras `docker login ghcr.io`).
 - **Publicación automática:** `publish.yml`, en cada push a `main`, publica la imagen `<versión>-<commit>`. Para sacar una versión basta subirla en `[workspace.package]`: el workflow añade `<versión>` y `latest` y crea la etiqueta `v<versión>`, con su release de GitHub.

@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: geko
+# The operator and what only a local cluster needs: the namespace and the stand-in of the Ingress
+# controller. The operator makes the rest from the config map `geko`.
+resources:
+  - ../../operator
+  - namespace.yaml
+  - gateway.yaml
+# The operator reads the config map by its name, and rolls the pods by the digest of its data.
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: geko
+    files:
+      - geko.toml
+  - name: gateway
+    files:
+      - gateway.conf
+# The image of `make start-dev` (geko with both modules, loaded into the cluster) is that of the
+# operator and, through its `--image`, that of each module.
+images:
+  - name: ghcr.io/candymaps/geko
+    newName: geko
+    newTag: dev
+patches:
+  # kind and k3d provision ReadWriteOnce volumes only, and every pod runs on their one node.
+  - target:
+      kind: Deployment
+      name: geko-operator
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/args
+        value:
+          - operator
+          - --listen
+          - 0.0.0.0:8080
+          - --image
+          - geko:dev
+          - --storage
+          - 20Gi
+          - --access-mode
+          - ReadWriteOnce

@@ -18,6 +18,7 @@ geko-artifact.workspace = true
 geko-module-sdk.workspace = true
 geko-server.workspace = true
 geko-fetch.workspace = true
+geko-kube.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 hex = "0.4"
