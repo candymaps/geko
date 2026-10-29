@@ -1,4 +1,5 @@
 import { createContext, type ComponentChildren } from "preact";
+import { FlaskConical } from "lucide-preact";
 import { useContext, useEffect, useState } from "preact/hooks";
 
 export type Mode = "mock" | "live";
@@ -59,13 +60,23 @@ export function SourceProvider({ children }: { children: ComponentChildren }) {
   return <Context.Provider value={{ mode, setMode, up }}>{children}</Context.Provider>;
 }
 
-export function ModeToggle() {
+export function ModeToggle({ compact }: { compact: boolean }) {
   const { mode, setMode, up } = useSource();
   if (!DEV) return null;
   const live = mode === "live";
   const hint = up === null ? "Looking for geko…" : up ? "geko answers at /health" : "geko does not answer: start it, or use mock";
+  const title = `${live ? "Live" : "Mock"}: ${hint}`;
+  if (compact) {
+    return (
+      <button class={`item mode-check${live ? " live" : ""}`} role="switch" aria-checked={live} aria-label="Mock/Live" data-tip={title} onClick={() => setMode(live ? "mock" : "live")}>
+        <span class="icon">
+          <FlaskConical size={17} />
+        </span>
+      </button>
+    );
+  }
   return (
-    <button class="mode" role="switch" aria-checked={live} data-mode={mode} title={`${live ? "Live" : "Mock"}: ${hint}`} onClick={() => setMode(live ? "mock" : "live")}>
+    <button class="mode" role="switch" aria-checked={live} data-mode={mode} data-tip={title} onClick={() => setMode(live ? "mock" : "live")}>
       <span class="thumb" />
       <span class={`opt${live ? "" : " on"}`} data-text="Mock">
         Mock

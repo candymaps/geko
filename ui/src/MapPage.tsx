@@ -152,6 +152,12 @@ export function MapPage({ geocoder, tiles, active }: Props) {
     if (active) mapRef.current?.resize();
   }, [active, ready]);
 
+  const clear = () => {
+    ++latest.current;
+    setResults([]);
+    setStatus(HINT);
+  };
+
   const flyTo = (f: Feature, zoom: number) => mapRef.current?.flyTo({ center: f.geometry.coordinates, zoom });
 
   return (
@@ -167,6 +173,7 @@ export function MapPage({ geocoder, tiles, active }: Props) {
               const value = e.currentTarget.value;
               setText(value);
               if (value.trim()) void ask("autocomplete", { text: value });
+              else clear();
             }}
             onKeyDown={async (e) => {
               if (e.key !== "Enter" || !text.trim()) return;
@@ -204,7 +211,14 @@ export function MapPage({ geocoder, tiles, active }: Props) {
               </li>
             ))}
           </ul>
-          <div class="status">{status}</div>
+          <div class="status">
+            <span>{status}</span>
+            {status !== HINT && (
+              <button class="link" onClick={clear}>
+                Clear suggestions
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

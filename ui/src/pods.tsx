@@ -52,7 +52,7 @@ export function PodFilter({ pods, only, onPick }: { pods: PodData<unknown>[]; on
             class={`gc-pod pod-${tone(i)}${off ? " off" : ""}${dead ? " dead" : ""}`}
             aria-pressed={!off && !dead}
             disabled={dead}
-            title={dead ? `${p.pod}: ${p.error ?? "no data"}` : only === p.pod ? `${p.pod}: click to show all` : `${p.pod}: click to focus`}
+            data-tip={dead ? `${p.pod}: ${p.error ?? "no data"}` : only === p.pod ? `${p.pod}: click to show all` : `${p.pod}: click to focus`}
             onClick={() => onPick(p.pod)}
           >
             <i />

@@ -1,13 +1,13 @@
-import { Earth } from "lucide-preact";
+import { Menu } from "lucide-preact";
 import type { ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { useApi, type ModuleInfo } from "./api";
 import { GeocoderPage } from "./geocoder/GeocoderPage";
 import { TilesPage } from "./tiles/TilesPage";
 import { useMedia, useRoute, useStored } from "./hooks";
-import { ModeToggle, useSource } from "./source";
+import { useSource } from "./source";
+import { PageHead } from "./PageHead";
 import { capitalize, iconOf, Sidebar } from "./Sidebar";
-import { Topbar } from "./Topbar";
 
 const MAP = "map";
 
@@ -62,24 +62,28 @@ export function App() {
       <Sidebar modules={modules ?? []} route={current} open={open} drawer={small && drawer} onToggle={toggle} onNavigate={navigate} />
       {small && drawer && <div class="scrim" onClick={() => setDrawer(false)} />}
       <div class="column">
-        <Topbar
-          title={onMap ? "Map" : capitalize(current)}
-          Icon={onMap ? Earth : iconOf(current)}
-          menu={small}
-          onMenu={() => setDrawer(true)}
-          actions={<ModeToggle />}
-        />
         <main>
-          {offline && <p class="error">geko does not answer. Start it, or switch to Mock.</p>}
-          {!offline && error && <p class="error">{error}</p>}
-          {MapPage && (
-            <div class="page" hidden={!onMap}>
-              <MapPage key={mode} geocoder={geocoder} tiles={tiles} active={onMap} />
-            </div>
+          {onMap ? (
+            small && (
+              <button class="menu float" onClick={() => setDrawer(true)} aria-label="Menu">
+                <Menu size={20} />
+              </button>
+            )
+          ) : (
+            <PageHead title={capitalize(current)} Icon={iconOf(current)} menu={small} onMenu={() => setDrawer(true)} />
           )}
-          {!onMap && current === "geocoder" && <GeocoderPage version={module?.version} />}
-          {!onMap && current === "tiles" && <TilesPage version={module?.version} />}
-          {!onMap && current !== "geocoder" && current !== "tiles" && <div class="empty">Nothing here yet.</div>}
+          <div class="body">
+            {offline && <p class="error">geko does not answer. Start it, or switch to Mock.</p>}
+            {!offline && error && <p class="error">{error}</p>}
+            {MapPage && (
+              <div class="page" hidden={!onMap}>
+                <MapPage key={mode} geocoder={geocoder} tiles={tiles} active={onMap} />
+              </div>
+            )}
+            {!onMap && current === "geocoder" && <GeocoderPage version={module?.version} />}
+            {!onMap && current === "tiles" && <TilesPage version={module?.version} />}
+            {!onMap && current !== "geocoder" && current !== "tiles" && <div class="empty">Nothing here yet.</div>}
+          </div>
         </main>
       </div>
     </div>

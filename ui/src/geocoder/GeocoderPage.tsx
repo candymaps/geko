@@ -238,7 +238,7 @@ function Performance() {
       <Card title="Confidence of the first result" aside="Text searches and autocompletes">
         <div class="gc-hist" role="img" aria-label="Distribution of confidence, from 0 to 1">
           {stats.confidence.map((v, i) => (
-            <div key={i} class="col" style={{ height: `${(v / Math.max(1, ...stats.confidence)) * 100}%` }} title={`${i / 10}–${(i + 1) / 10}: ${percent(v, firstResults)}`} />
+            <div key={i} class="col" style={{ height: `${(v / Math.max(1, ...stats.confidence)) * 100}%` }} data-tip={`${i / 10}–${(i + 1) / 10}: ${percent(v, firstResults)}`} />
           ))}
         </div>
         <div class="gc-axis">
