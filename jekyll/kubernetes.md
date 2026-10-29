@@ -1,6 +1,7 @@
 ---
 title: Kubernetes
 nav_order: 7
+has_children: true
 ---
 
 # Kubernetes
@@ -8,7 +9,8 @@ nav_order: 7
 
 geko runs as one process with every module in it (`single`), anywhere: Docker, compose, a server or a
 pod. In a cluster it can also run in the **operator mode**: one deployment per module, so a module can
-fail, scale and be updated on its own.
+fail, scale and be updated on its own. To get the files for a cluster from a few choices, use the
+[wizard]({% link wizard.md %}).
 
 1. TOC
 {:toc}

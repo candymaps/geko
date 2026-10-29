@@ -7,7 +7,8 @@
 #   ci/deploy.sh render   writes both again
 #   ci/deploy.sh check    fails if one is not what geko writes now (a change of the code or of
 #                         deploy/geko.toml without rendering), if an overlay does not build with
-#                         kustomize, or if what it builds does not pass kubeconform
+#                         kustomize, if what it builds does not pass kubeconform, or if the wizard of
+#                         the docs (jekyll/assets/js/geko-wizard.js) writes another operator.yaml
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,7 +22,9 @@ INSTALL=deploy/operator/resources.yaml
 # What `geko k8s $1` writes for deploy/geko.toml, in the file `$2`. Without logs: the manifests go
 # to the standard output.
 render_to() {
-    RUST_LOG=off GEKO_CONFIG=deploy/geko.toml cargo run --locked -q -p geko-app --bin geko -- k8s "$1" > "$2"
+    local command=$1 out=$2
+    shift 2
+    RUST_LOG=off GEKO_CONFIG=deploy/geko.toml cargo run --locked -q -p geko-app --bin geko -- k8s "$command" "$@" > "$out"
 }
 
 conform() {
@@ -46,6 +49,21 @@ overlay_manifests() {
     if command -v kustomize > /dev/null; then kustomize build "$1"; else kubectl kustomize "$1"; fi
 }
 
+# The wizard of the docs writes the operator.yaml of `geko k8s install`, with the defaults and with
+# every option set. `$1` is a file to write geko's output to.
+wizard() {
+    if ! command -v node > /dev/null; then
+        [ -z "${CI:-}" ] || { echo "the wizard check needs node" >&2; return 1; }
+        echo "node is not installed: the wizard of the docs is not checked" >&2
+        return 0
+    fi
+    local options=(--tag 0.2.0 --storage 50Gi --storage-class nfs-client --access-mode ReadWriteOnce --host geko.example.org
+        --image-prefix registry.example.org/geko/geko- --operator-image registry.example.org/geko/geko:0.2.0)
+    node ci/wizard-check.js "$INSTALL" || return 1
+    render_to install "$1" "${options[@]}"
+    node ci/wizard-check.js "$1" "${options[@]}"
+}
+
 check() {
     local status=0 fresh
     fresh=$(mktemp)
@@ -60,6 +78,7 @@ check() {
             status=1
         fi
     done
+    wizard "$fresh" || status=1
     local overlay
     for overlay in deploy/overlays/*/; do
         echo "==> $overlay"
