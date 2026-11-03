@@ -231,11 +231,11 @@ Calidad, 1.000 pares contra OSRM CH: distancia con mediana 0,999 (el 86,5 % a me
 - [ ] 21. Proveedores genéricos por `kind`, con Madrid movido al pack.
 - [ ] 22. Casar los sensores al generar el bundle, no en servicio.
 - [ ] 23. Combinar varias fuentes: hoy hay un único poller y cada lectura sustituye a la anterior.
-- [ ] 24. Perfil histórico: mediciones, velocidad por hora y día, calendario de festivos, y decaimiento hacia el histórico en vez de a velocidad libre.
+- [ ] 24. Perfil histórico: mediciones, velocidad por hora y día, calendario de festivos, y decaimiento hacia el histórico en vez de a velocidad libre. Como mete datos de Madrid (CC BY) en el bundle junto al grafo de OSM (ODbL), hay que declarar en el manifiesto qué lleva cada licencia. El código sigue siendo AGPL; hoy no hay mezcla, porque el tráfico en vivo no va en el bundle.
 - [ ] 25. `traffic=none|historical|live` y `depart_at`, con la parte histórica en `traffic.coverage`.
-- [ ] 26. Incidencias: parser DATEX II y cierre real de vías (hoy lo más lento es un 5 % de la velocidad).
-- [ ] 27. **[gestión]** Leer las condiciones de uso de Madrid y pedir a la DGT por escrito su licencia.
-- [ ] 28. **[decisión]** Qué parte del bundle es ODbL y cuál CC BY, declarado en el manifiesto.
+- [ ] 26. Incidencias: parser DATEX II y cierre real de vías (hoy lo más lento es un 5 % de la velocidad). La fuente de la DGT queda desactivada por defecto hasta cerrar el punto 28.
+- [ ] 27. **[gestión]** Leer las condiciones de uso de Madrid y la ficha del conjunto de histórico antes de publicar el pack.
+- [ ] 28. **[gestión]** Escribir a la DGT para aclarar su licencia. Es una precaución, no un permiso previo: no bloquea el punto 26 y solo condiciona activar la fuente por defecto.
 
 ### E. Funciones de la fase posterior
 
