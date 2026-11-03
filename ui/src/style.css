@@ -1220,3 +1220,52 @@ main {
   color: var(--ink);
   cursor: pointer;
 }
+
+button.gc-chip {
+  cursor: pointer;
+  font: inherit;
+}
+button.gc-chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.gc-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gc-editor input,
+.gc-editor textarea {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  font: 12px/1.5 ui-monospace, monospace;
+  padding: 8px;
+  width: 100%;
+}
+.gc-editor input {
+  max-width: 280px;
+}
+.gc-editor-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gc-editor-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 14px;
+}
+.gc-editor-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.gc-editor-error {
+  color: #c0392b;
+}
