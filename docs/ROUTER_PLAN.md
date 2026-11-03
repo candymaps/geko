@@ -1,6 +1,6 @@
 # Módulo `geko-router`: plan
 
-Estado: borrador (2026-11-03). Nada implementado. Las decisiones abiertas están al final.
+Estado (2026-11-04): en desarrollo, en la rama `feature/router-module` de `candymaps/geko-router`, sin publicar. Lo hecho y lo que falta está en «Seguimiento». Las decisiones abiertas están al final.
 
 ## Objetivo
 
@@ -177,6 +177,84 @@ Cada paso deja resultados verificables antes del siguiente.
 7. **Incidencias** (DATEX II): cortes y penalizaciones.
 8. **`match`, isócronas, bici, a pie, camión.**
 9. **Documentación** en cada paso: este plan, PROJECT.md (módulos, §14 hoja de ruta y §16 pendientes), README del host (módulo nuevo) y del módulo.
+
+## Seguimiento
+
+Lista de trabajo, en el orden previsto. Al cerrar un punto se marca aquí, con su commit o su medición. Los marcados con **[decisión]** o **[gestión]** dependen del propietario del proyecto.
+
+**Hecho (2026-11-04):** grafo con giros, restricciones y ferris; CCH con customización en caliente; `v1/route`, `v1/nearest`, `v1/table` (una consulta por celda, 100×100 como máximo) y `v1/status`; tráfico en vivo de los sensores de Madrid, opcional y desactivado por defecto, con `traffic.coverage`.
+
+**Primera medición contra OSRM (2026-11-03, Baleares, OSRM v26.11.0, una sola máquina):** geko, OSRM y `wrk` en contenedores con la misma red, servidores en 8 núcleos, 16 conexiones con keep-alive, mismas URLs y rondas alternas. Se descarta una ronda de OSRM CH que duró 9,66 min, probablemente por una suspensión del equipo.
+
+| | geko | OSRM CH | OSRM MLD |
+|---|---|---|---|
+| Sin geometría, peticiones/s | 9.061–9.866 | 9.343–9.579 | 7.489–7.678 |
+| Sin geometría, p99 | 3,1–3,4 ms | 2,5–2,9 ms | 3,0 ms |
+| Con geometría, peticiones/s | 5.103–5.702 | 3.578–4.044 | 2.946–3.498 |
+| Con geometría, p99 | 5,4–6,6 ms | 6,9–8,5 ms | 7,9–13,3 ms |
+| RAM en reposo | 724 MB | ~85 MB | ~85 MB |
+| RAM tras la carga | 851 MB (pico 1,1 GB) | 101 MB | 115 MB |
+
+Calidad, 1.000 pares contra OSRM CH: distancia con mediana 0,999 (el 86,5 % a menos del 2 %), duración con mediana 0,800. CCH coincide con Dijkstra en todos los pares comprobados. «Más rápido que OSRM» sigue sin confirmarse: empate con CH sin geometría, y falta España completa.
+
+### A. Base sólida y medida
+
+- [ ] 1. Reducir la memoria y el tiempo de carga (724 MB y 3,4 s en Baleares, con un grafo de 28 MB en disco). A esa escala España no cabría en 15 GB, así que va antes del punto 4.
+- [ ] 2. Pasar a `mmap` el grafo y la jerarquía.
+- [ ] 3. Añadir mimalloc en la `.so` del módulo.
+- [ ] 4. Medir España completa contra OSRM: generación, RAM, consultas y customización, incluido si los hilos ayudan (en Baleares no mejora de 1 a 16).
+- [ ] 5. Calibrar las duraciones con tiempos reales: salen un 20 % por debajo de OSRM.
+- [ ] 6. Revisar en un mapa los pares con más diferencia de distancia (ratio de 0,59 a 1,60).
+- [ ] 7. Arreglar el ejemplo `load` o sustituirlo por `wrk`: abre una conexión por petición y oculta fallos, y sus cifras no valen.
+
+### B. API de la fase 1
+
+- [ ] 8. **[decisión]** Formato de la API: propio o compatible con OSRM.
+- [ ] 9. Alternativas y pasos en `route`.
+- [ ] 10. `table` con un algoritmo muchos-a-muchos, hasta 1.000×1.000, y segunda medición.
+- [ ] 11. Índice espacial del plan (R-tree de Hilbert), o decidir que basta la rejilla actual.
+- [ ] 12. `openapi.yaml` y demo en `/router/`.
+
+### C. Packs de país
+
+- [ ] 13. Cargador de packs: hoy `countries/es/` no se lee y `road-classes` va incrustado.
+- [ ] 14. Opciones del plan en `geko-router.toml`: `[packs]`, `[profiles]`, `[serve]` y `[sources.<nombre>]`.
+- [ ] 15. Completar el pack `es`: `regions.toml`, golden y tests.
+- [ ] 16. Pack `lu`.
+- [ ] 17. Particiones por provincia con sellos.
+- [ ] 18. Publicación firmada de los packs en ghcr.
+
+### D. Tráfico completo
+
+- [ ] 19. Probar la capa en vivo con el feed real de Madrid, de punta a punta.
+- [ ] 20. Calibrar la conversión de nivel de servicio a velocidad (valores provisionales).
+- [ ] 21. Proveedores genéricos por `kind`, con Madrid movido al pack.
+- [ ] 22. Casar los sensores al generar el bundle, no en servicio.
+- [ ] 23. Combinar varias fuentes: hoy hay un único poller y cada lectura sustituye a la anterior.
+- [ ] 24. Perfil histórico: mediciones, velocidad por hora y día, calendario de festivos, y decaimiento hacia el histórico en vez de a velocidad libre.
+- [ ] 25. `traffic=none|historical|live` y `depart_at`, con la parte histórica en `traffic.coverage`.
+- [ ] 26. Incidencias: parser DATEX II y cierre real de vías (hoy lo más lento es un 5 % de la velocidad).
+- [ ] 27. **[gestión]** Leer las condiciones de uso de Madrid y pedir a la DGT por escrito su licencia.
+- [ ] 28. **[decisión]** Qué parte del bundle es ODbL y cuál CC BY, declarado en el manifiesto.
+
+### E. Funciones de la fase posterior
+
+- [ ] 29. `match` (map matching).
+- [ ] 30. Isócronas.
+- [ ] 31. `trip`.
+- [ ] 32. Perfiles de bici, a pie y camión.
+
+### F. Publicación
+
+- [ ] 33. CI del módulo: `.github`, `ci/test.sh`, `deny.toml` y conformidad en cada PR.
+- [ ] 34. Publicar el módulo firmado y añadirlo a `ci/modules` del host.
+- [ ] 35. README, `AGENTS.md`, sección «Optimizaciones» y referencia de opciones del módulo.
+- [ ] 36. Mergear `feature/router-plan` en el host y actualizar PROJECT.md.
+- [ ] 37. PR de `feature/router-module` a `dev`, y de `dev` a `main`.
+
+### Propuesta de corte de la v1
+
+**[decisión]** Bloques A, B y F, más los puntos 13–15 del pack `es`, con el tráfico de Madrid desactivado por defecto. El resto de C y D iría en versiones siguientes, y E al final.
 
 ## Riesgos
 
