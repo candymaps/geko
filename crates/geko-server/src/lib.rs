@@ -300,6 +300,16 @@ fn response(r: module::Response) -> Response {
     response
 }
 
+/// Where the client reached geko, from the headers of the request: a client can send anything here,
+/// so what is not a plain host and port is no origin. Only that client reads what it makes of it.
+fn origin(headers: &HeaderMap) -> Option<String> {
+    let first = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()).map(str::trim).filter(|v| !v.is_empty());
+    let host = first("x-forwarded-host").or_else(|| first("host"))?;
+    let plain = host.len() <= 255 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]_".contains(&b));
+    let scheme = first("x-forwarded-proto").filter(|s| matches!(*s, "http" | "https")).unwrap_or("http");
+    plain.then(|| format!("{scheme}://{host}"))
+}
+
 /// The handler of one route of a module: the request as data, answered on the pool if the route
 /// asks for it.
 fn handler(module: Arc<dyn Module>, route: &module::Route) -> MethodRouter {
@@ -313,6 +323,7 @@ fn handler(module: Arc<dyn Module>, route: &module::Route) -> MethodRouter {
             content_type: headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_owned),
             body: body.to_vec(),
             waited_us: 0,
+            origin: origin(&headers),
         };
         if !pool {
             return response(module.handle(request));
@@ -487,6 +498,26 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         (self.status, Json(json!({ "error": self.message }))).into_response()
+    }
+}
+
+#[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    fn headers(list: &[(&'static str, &'static str)]) -> HeaderMap {
+        list.iter().map(|(k, v)| (axum::http::HeaderName::from_static(k), axum::http::HeaderValue::from_static(v))).collect()
+    }
+
+    #[test]
+    fn the_origin_is_where_the_client_reached_geko() {
+        assert_eq!(origin(&headers(&[("host", "maps.example.com:8080")])).as_deref(), Some("http://maps.example.com:8080"));
+        let proxied = [("host", "geko:8080"), ("x-forwarded-host", "maps.example.com, proxy"), ("x-forwarded-proto", "https")];
+        assert_eq!(origin(&headers(&proxied)).as_deref(), Some("https://maps.example.com"));
+        assert_eq!(origin(&headers(&[("host", "[::1]:8080"), ("x-forwarded-proto", "gopher")])).as_deref(), Some("http://[::1]:8080"));
+        assert_eq!(origin(&headers(&[])), None);
+        assert_eq!(origin(&headers(&[("host", "evil.example/path?")])), None);
+        assert_eq!(origin(&headers(&[("host", "a b")])), None);
     }
 }
 

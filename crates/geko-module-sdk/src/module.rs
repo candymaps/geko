@@ -229,6 +229,12 @@ pub struct Request {
     /// Microseconds it waited in the host before reaching the module (for a free core, on the
     /// pool): part of its time, which the module counts in what it reports.
     pub waited_us: u64,
+    /// Where the client reached geko, `https://maps.example.com`, for the absolute URLs a module
+    /// writes: `Host`, or `X-Forwarded-Host` and `X-Forwarded-Proto` behind a proxy. `None` if
+    /// the request names none, and from a host older than this field: the contract does not change,
+    /// because a module and a host that do not know it read each other as before.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
