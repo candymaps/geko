@@ -40,6 +40,30 @@ Los dos módulos guardan el extracto en la misma ruta, `raw/osm/<id>-latest.osm.
 - **Cada módulo decide su política de refresco.** En la corrida de Baleares, el geocoder construyó con el extracto del 22-10 y tiles recibió uno nuevo que sobrescribió el fichero: dos módulos con instantáneas distintas de OSM. Habría que decidir si el host impone una política común.
 - **El punto 48 de PROJECT.md** (carpetas por módulo) rompería la compartición.
 
+### Propuesta pendiente: descargar una vez, compartir y borrar al final (anotada el 2026-11-03)
+
+**No se hace todavía:** se retoma cuando `geko-router` esté implementado. Queda aquí para no perder el razonamiento.
+
+El problema no es si se conservan las descargas, sino que dos módulos necesitan **la misma instantánea de la fuente durante la descarga y el indexado**. Con `keep_downloads = false`, cada módulo borra al acabar lo que el otro aún puede necesitar, y con `true` se comparte por casualidad y para siempre. Hay que sacar la decisión de los módulos y ponerla en el host, con un único lugar compartido.
+
+Esquema propuesto, que usa lo que el contrato ya tiene (`plan`, `fetch`, `build` en `Module`) y el `Downloader`, que ya reutiliza por ruta, ficha y GET condicional:
+
+1. **Un Job de fetch para todos los módulos activos**, antes de los builds. Llama a `fetch` de cada módulo contra el mismo `raw/` del PVC. Las fuentes comunes (el PBF de OSM) se bajan una vez, serializadas en ese Job, sin pisarse (`.part`).
+2. **Los Jobs de build leen `raw/` sin descargar** (`offline`). Todos ven la misma instantánea, así que dejan de poder discrepar (geocoder con el extracto del 22-10 y tiles con uno más nuevo). Como solo leen, podrían correr a la vez.
+3. **Un paso final de limpieza, del host y no de los módulos:** si `keep_downloads = false`, borra de `raw/` lo que ningún módulo activo del ciclo necesita ya, y deja la ficha. Sustituye al borrado por módulo tras publicar.
+4. **Un solo sello de la fuente por ciclo:** la identidad (sha256) que el Job de fetch anota es la que entra en los sellos de las etapas de todos los módulos, así que dos módulos que dicen «OSM» dicen la misma versión de OSM.
+
+Lo que cambia y lo que no:
+
+- `keep_downloads = false` pasa a significar «el host borra al acabar el ciclo», no «cada módulo borra al publicar». Con `true` nada se borra, como hoy.
+- Si un build tiene que repetir una etapa y el fichero ya se borró, el `Downloader` lo trae de nuevo (`keeps_removed`), como hoy: una vez, no dos.
+- El PVC debe poder alojar a la vez todas las fuentes del ciclo (con España, unos 1,56 GB de OSM más Overture y CartoCiudad).
+- En `single` el mismo orden (fetch común, builds, limpieza) sirve sin cambio de comportamiento visible.
+- Sigue siendo necesario resolver lo ya listado arriba: el `--purge` del geocoder (arreglado en una rama), la política de refresco común y el punto 48 de PROJECT.md.
+- Más adelante, un `BundleStore` o un almacén de objetos (S3) para `raw/` permitiría lo mismo sin `ReadWriteMany`.
+
+El router ya está preparado: lee el PBF por la misma ruta y nombre que el geocoder y tiles (`raw/osm/<id>-latest.osm.pbf`), su `fetch` es independiente de su `build`, y las fuentes de tráfico no pasan por `raw/` (se leen en vivo en el pod que sirve).
+
 ## Decidido
 
 ### El modo se elige en la configuración (2026-10-24)
