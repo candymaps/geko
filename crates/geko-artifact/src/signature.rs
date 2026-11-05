@@ -15,7 +15,7 @@ pub const SIGNATURE_FILE: &str = "signature.json";
 
 /// The public keys whose signatures this binary trusts (hex). The private key is a secret of the
 /// CI that publishes the artifacts (`GEKO_PACK_SIGNING_KEY`).
-const TRUSTED_KEYS: &[&str] = &["26b041ad43868090b3411186f8ed492442ffd8c8b32c9ca1215d25ae98fe8f79"];
+const TRUSTED_KEYS: &[&str] = &["1a6b668dd0dfe5781faf215aa98b34e879ad0030b78fed28ab3db8890ca15a8c"];
 
 /// What is signed: a signature of one kind never passes for one of another, so that a country pack
 /// cannot be presented as a module.
