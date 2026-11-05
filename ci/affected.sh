@@ -21,6 +21,7 @@ deploy=0
 rust=0
 while IFS= read -r file; do
     case $file in
+        jekyll/assets/js/* | ci/wizard-check.js) deploy=1 ;;
         *.md | docs/* | jekyll/* | LICENSE | develop/* | Dockerfile | .dockerignore | .github/* | Makefile | make.cmd | ci/affected.sh) ;;
         ui/* | ci/ui.sh) ui=1 ;;
         deploy/* | ci/deploy.sh) deploy=1 ;;

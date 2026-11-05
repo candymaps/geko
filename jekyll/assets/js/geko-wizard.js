@@ -1,0 +1,292 @@
+// The wizard of the Kubernetes page: the files for a cluster with the operator of geko, from a form,
+// zipped in the browser. The manifest of the operator is what `geko k8s install` writes
+// (crates/geko-app/src/k8s.rs): ci/wizard-check.js fails if it is not, so it is never edited without it.
+(function (root) {
+  "use strict";
+
+  const PORT = 8080;
+  const OPERATOR = "geko-operator";
+  const CONFIG_MAP = "geko";
+  const SITE = "https://candymaps.github.io/geko/wizard/";
+
+  const DEFAULTS = {
+    namespace: "geko",
+    tag: "latest",
+    imagePrefix: "ghcr.io/candymaps/geko-",
+    operatorImage: "",
+    storage: "20Gi",
+    storageClass: "",
+    accessMode: "ReadWriteMany",
+    host: "",
+  };
+
+  // YAML, as geko writes it: keys in order, strings in double quotes, a list indented under its key.
+  function yaml(value, indent) {
+    const pad = " ".repeat(indent);
+    const lines = [];
+    for (const key of Object.keys(value).sort()) {
+      const v = value[key];
+      if (Array.isArray(v)) {
+        lines.push(`${pad}${key}:`);
+        for (const item of v) {
+          if (item !== null && typeof item === "object") {
+            const inner = yaml(item, indent + 4).split("\n");
+            inner[0] = `${pad}  - ${inner[0].slice(indent + 4)}`;
+            lines.push(...inner);
+          } else {
+            lines.push(`${pad}  - ${scalar(item)}`);
+          }
+        }
+      } else if (v !== null && typeof v === "object") {
+        lines.push(`${pad}${key}:`, yaml(v, indent + 2));
+      } else {
+        lines.push(`${pad}${key}: ${scalar(v)}`);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  const scalar = (v) => (typeof v === "string" ? JSON.stringify(v) : String(v));
+
+  function install(options) {
+    const o = { ...DEFAULTS, ...options };
+    const labels = { "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator", "app.kubernetes.io/part-of": "geko" };
+    const selector = { "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator" };
+    const args = ["operator", "--listen", `0.0.0.0:${PORT}`, "--image-prefix", o.imagePrefix, "--tag", o.tag, "--storage", o.storage, "--access-mode", o.accessMode];
+    if (o.storageClass) args.push("--storage-class", o.storageClass);
+    if (o.host) args.push("--host", o.host);
+    const manage = ["get", "list", "watch", "create", "patch", "delete"];
+    const resources = [
+      { apiVersion: "v1", kind: "ServiceAccount", metadata: { name: OPERATOR, labels } },
+      {
+        apiVersion: "rbac.authorization.k8s.io/v1",
+        kind: "Role",
+        metadata: { name: OPERATOR, labels },
+        rules: [
+          { apiGroups: [""], resources: ["configmaps"], verbs: ["get", "list", "watch"] },
+          { apiGroups: [""], resources: ["services"], verbs: manage },
+          { apiGroups: [""], resources: ["pods"], verbs: ["get", "list"] },
+          { apiGroups: [""], resources: ["persistentvolumeclaims"], verbs: ["get", "list", "watch", "create", "patch"] },
+          { apiGroups: ["apps"], resources: ["deployments"], verbs: manage },
+          { apiGroups: ["batch"], resources: ["cronjobs"], verbs: manage },
+          { apiGroups: ["batch"], resources: ["jobs"], verbs: manage },
+          { apiGroups: ["networking.k8s.io"], resources: ["ingresses"], verbs: manage },
+        ],
+      },
+      {
+        apiVersion: "rbac.authorization.k8s.io/v1",
+        kind: "RoleBinding",
+        metadata: { name: OPERATOR, labels },
+        roleRef: { apiGroup: "rbac.authorization.k8s.io", kind: "Role", name: OPERATOR },
+        subjects: [{ kind: "ServiceAccount", name: OPERATOR }],
+      },
+      {
+        apiVersion: "apps/v1",
+        kind: "Deployment",
+        metadata: { name: OPERATOR, labels },
+        spec: {
+          replicas: 1,
+          selector: { matchLabels: selector },
+          template: {
+            metadata: { labels },
+            spec: {
+              serviceAccountName: OPERATOR,
+              containers: [
+                {
+                  name: "geko",
+                  image: o.operatorImage || `ghcr.io/candymaps/geko:${o.tag}`,
+                  args,
+                  ports: [{ name: "http", containerPort: PORT }],
+                  volumeMounts: [{ name: "config", mountPath: "/etc/geko", readOnly: true }],
+                  livenessProbe: { httpGet: { path: "/health", port: "http" }, periodSeconds: 10 },
+                  readinessProbe: { httpGet: { path: "/ready", port: "http" }, periodSeconds: 5 },
+                },
+              ],
+              volumes: [{ name: "config", configMap: { name: CONFIG_MAP } }],
+            },
+          },
+        },
+      },
+      {
+        apiVersion: "v1",
+        kind: "Service",
+        metadata: { name: OPERATOR, labels },
+        spec: { selector, ports: [{ name: "http", port: 80, targetPort: "http" }] },
+      },
+    ];
+    const header =
+      "# Generated by `geko k8s install`: the operator of geko, which makes the rest from the config map `geko`.\n" +
+      "# The config map itself is not here: each overlay makes it.\n";
+    return header + resources.map((r) => yaml(r, 0) + "\n").join("---\n");
+  }
+
+  const toml = (s) => JSON.stringify(s);
+
+  // geko.toml: the modules, the scope, [data] and the replicas and resources of each module.
+  function config(o) {
+    const out = [
+      `# Written by the geko wizard (${SITE}). It is the config map \`geko\`: the operator makes the cluster what it says.`,
+      "",
+      "[modules]",
+      ...o.modules.map((m) => `${m.name.padEnd(8)} = ${m.enabled}`),
+      "",
+    ];
+    for (const s of o.scope) {
+      out.push("[[scope]]", `country = ${toml(s.country)}`);
+      if (s.regions.length) out.push(`regions = [${s.regions.map(toml).join(", ")}]`);
+      out.push("");
+    }
+    out.push("[data]", `accept_licenses = ${o.acceptLicenses}`);
+    out.push("# The builds of the modules share raw/: the second would download again what the first removed.");
+    out.push("keep_downloads  = true", "# How often the cron jobs refresh the data.", `max_age_days    = ${o.maxAgeDays}`, "");
+    out.push("[deploy]", 'mode = "operator"', "");
+    for (const m of o.modules.filter((m) => m.enabled)) {
+      out.push(`[deploy.${m.name}]`, `replicas     = ${m.replicas}`);
+      for (const [key, value] of [["cpu", m.cpu], ["memory", m.memory], ["build_cpu", m.buildCpu], ["build_memory", m.buildMemory]]) {
+        if (value) out.push(`${key.padEnd(12)} = ${toml(value)}`);
+      }
+      out.push("");
+    }
+    return out.join("\n").replace(/\n+$/, "\n");
+  }
+
+  const namespaceYaml = (name) => yaml({ apiVersion: "v1", kind: "Namespace", metadata: { name } }, 0) + "\n";
+
+  function kustomization(o, files) {
+    const lines = [
+      "apiVersion: kustomize.config.k8s.io/v1beta1",
+      "kind: Kustomization",
+      "# What to keep in Git for the cluster: the operator and the configuration it reads. The deployments, services,",
+      "# build jobs and Ingress of the modules are made by the operator from geko.toml.",
+      `namespace: ${o.namespace}`,
+      "resources:",
+      "  - namespace.yaml",
+      "  - operator.yaml",
+      "# The operator reads the config map by its name, and rolls the pods by the digest of its data.",
+      "generatorOptions:",
+      "  disableNameSuffixHash: true",
+      "configMapGenerator:",
+      `  - name: ${CONFIG_MAP}`,
+      "    files:",
+      ...files.map((f) => `      - geko-provisioning/${f}`),
+    ];
+    return lines.join("\n") + "\n";
+  }
+
+  function readme(o) {
+    return [
+      "# geko, in a cluster with the operator",
+      "",
+      `Written by the geko wizard (${SITE}).`,
+      "",
+      "```sh",
+      "kubectl apply -k .",
+      `kubectl -n ${o.namespace} get pods`,
+      `kubectl -n ${o.namespace} logs -f deployment/${OPERATOR}`,
+      "```",
+      "",
+      "- `kustomization.yaml`: what `kubectl apply -k` reads. It carries the config map `geko` from `geko-provisioning/`.",
+      "- `operator.yaml`: the operator, as `geko k8s install` writes it. Never edited: write it again with another `--tag` to update.",
+      "- `geko-provisioning/`: the configuration the operator reads. Edit it and apply again: the operator makes the cluster what it says.",
+      "",
+      `The images are \`${o.operatorImage || "ghcr.io/candymaps/geko:" + o.tag}\` (the operator) and \`${o.imagePrefix}<module>:${o.tag}\` (each module).`,
+      "If the registry is private, the cluster needs the credentials to pull them: the manifests do not carry an `imagePullSecret`.",
+      "",
+    ].join("\n");
+  }
+
+  const MODULE_CONFIGS = {
+    geocoder: "# The configuration of the geocoder (the config map `geko` carries it beside geko.toml).\n# Every option is in its README: https://github.com/candymaps/geko-geocoder\n",
+  };
+
+  // What goes in the zip: path and text of each file.
+  function bundle(o) {
+    const provisioning = [["geko.toml", config(o)]];
+    for (const m of o.modules.filter((m) => m.enabled)) {
+      if (MODULE_CONFIGS[m.name]) provisioning.push([`geko-${m.name}.toml`, MODULE_CONFIGS[m.name]]);
+    }
+    return [
+      ["kustomization.yaml", kustomization(o, provisioning.map(([name]) => name))],
+      ["namespace.yaml", namespaceYaml(o.namespace)],
+      ["operator.yaml", install(o)],
+      ["README.md", readme(o)],
+      ...provisioning.map(([name, text]) => [`geko-provisioning/${name}`, text]),
+    ];
+  }
+
+  // A zip with no compression: the files are text and small, and it needs no library.
+  const CRC = (() => {
+    const table = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      table[n] = c >>> 0;
+    }
+    return (bytes) => {
+      let c = 0xffffffff;
+      for (const b of bytes) c = table[(c ^ b) & 0xff] ^ (c >>> 8);
+      return (c ^ 0xffffffff) >>> 0;
+    };
+  })();
+
+  function zip(files, now = new Date()) {
+    const encoder = new TextEncoder();
+    const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+    const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    const u16 = (v) => [v & 0xff, (v >>> 8) & 0xff];
+    const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff];
+    for (const [name, text] of files) {
+      const path = encoder.encode(name);
+      const data = encoder.encode(text);
+      const crc = CRC(data);
+      // 0x0800: the name is UTF-8. Method 0: stored.
+      const shared = [...u16(20), ...u16(0x0800), ...u16(0), ...u16(time), ...u16(date), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(path.length), ...u16(0)];
+      parts.push(Uint8Array.from([0x50, 0x4b, 0x03, 0x04, ...shared]), path, data);
+      central.push(Uint8Array.from([0x50, 0x4b, 0x01, 0x02, ...u16(20), ...shared, ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), path);
+      offset += 30 + path.length + data.length;
+    }
+    const size = central.reduce((n, p) => n + p.length, 0);
+    const end = Uint8Array.from([0x50, 0x4b, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(size), ...u32(offset), ...u16(0)]);
+    return new Blob([...parts, ...central, end], { type: "application/zip" });
+  }
+
+  const QUANTITY = /^\d+(\.\d+)?(m|k|[KMGTPE]i?)?$/;
+  const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+  const HOST = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
+  const TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+  const PREFIX = /^[a-z0-9][a-z0-9._:/-]*[-/_.]$/;
+  const IMAGE = /^[a-z0-9][a-z0-9._:/-]*$/;
+  const REGION = /^[A-Z]{2}-[A-Z0-9]{1,3}$/;
+
+  // The problems of the options, one sentence each; none when the files can be written.
+  function validate(o) {
+    const errors = [];
+    if (!LABEL.test(o.namespace)) errors.push("The namespace is a lowercase name, such as geko.");
+    if (!TAG.test(o.tag)) errors.push("The version is a tag, such as 0.2.0.");
+    if (!PREFIX.test(o.imagePrefix)) errors.push("The image prefix ends where the module name goes, such as ghcr.io/candymaps/geko-.");
+    if (o.operatorImage && !IMAGE.test(o.operatorImage)) errors.push("The image of the operator is not an image name.");
+    if (!QUANTITY.test(o.storage)) errors.push("The size of the volume is a quantity, such as 20Gi.");
+    if (o.host && !HOST.test(o.host)) errors.push("The host is a domain name, such as geko.example.org.");
+    if (!o.modules.some((m) => m.enabled)) errors.push("Choose at least one module.");
+    if (!o.scope.length) errors.push("Choose at least one country.");
+    for (const s of o.scope) {
+      for (const region of s.regions) if (!REGION.test(region)) errors.push(`${region} is not a region code, such as ES-PM.`);
+    }
+    if (!o.acceptLicenses) errors.push("geko downloads nothing until you accept the licenses of the sources.");
+    if (!Number.isInteger(o.maxAgeDays) || o.maxAgeDays < 1) errors.push("The days between refreshes is a whole number.");
+    for (const m of o.modules.filter((m) => m.enabled)) {
+      if (!Number.isInteger(m.replicas) || m.replicas < 1) errors.push(`The replicas of ${m.name} are a whole number.`);
+      for (const [label, value] of [["cpu", m.cpu], ["memory", m.memory], ["build cpu", m.buildCpu], ["build memory", m.buildMemory]]) {
+        if (value && !QUANTITY.test(value)) errors.push(`The ${label} of ${m.name} is a quantity, such as 500m or 4Gi.`);
+      }
+    }
+    return errors;
+  }
+
+  const api = { DEFAULTS, install, config, bundle, zip, validate };
+  if (typeof module !== "undefined" && module.exports) module.exports = api;
+  else root.GekoWizard = api;
+})(typeof globalThis !== "undefined" ? globalThis : this);
