@@ -9,12 +9,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use geko_module_sdk::bundle::{Artifact, BundleManifest, BundleModule, LicenseNotice};
-use geko_module_sdk::module::{BundlePart, Module};
+use geko_module_sdk::module::{BundlePart, Module, ModuleName};
 use geko_module_sdk::stages::StageLog;
 use geko_module_sdk::{GekoError, Result};
 use serde::Serialize;
 
-use crate::bundle::Published;
+use crate::bundle::{Keep, Published};
 use crate::bundle_store::{self, Build};
 use crate::config::Config;
 use crate::progress;
@@ -42,21 +42,28 @@ fn bundle_size(version: &str, artifacts: &[Artifact]) -> BundleSize {
 
 /// Builds the part of every module, then publishes a bundle with them all, unless nothing changed
 /// since the current one. With `keep_others` (a build of some modules, `--module`), the bundle also
-/// keeps what the current one has of the others.
+/// keeps what the current one has of the others. A module whose build fails holds back no other:
+/// the bundle keeps the part it had, and the build ends in that error once the rest is published.
 pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh: bool, keep_others: bool) -> Result<String> {
     let mut out = String::new();
     let (mut stages, mut extra) = (Vec::new(), serde_json::Map::new());
     let (mut entries, mut parts, mut licenses): (Vec<BundleModule>, Vec<BundlePart>, Vec<LicenseNotice>) = Default::default();
+    let mut failed: Vec<(ModuleName, GekoError)> = Vec::new();
     let _building = progress::Building::start();
     let ticker = progress::Ticker::start(modules);
     for (i, m) in modules.iter().enumerate() {
         ticker.module.store(i, Ordering::Relaxed);
         progress::module(m.describe().name.to_string());
-        let built = m.build(force, refresh);
-        if built.is_ok() {
-            progress::end();
-        }
-        let built = built?;
+        let built = match m.build(force, refresh) {
+            Ok(built) => built,
+            Err(e) => {
+                let name = m.describe().name;
+                tracing::error!(module = %name, error = %e, "the build of the module failed; the others go on");
+                failed.push((name, e));
+                continue;
+            }
+        };
+        progress::end();
         out.push_str(&built.report);
         stages.extend(built.stages);
         extra.extend(built.report_extra);
@@ -73,12 +80,18 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
         }
     }
     if entries.is_empty() {
-        return Ok(out);
+        return if failed.is_empty() { Ok(out) } else { Err(failure(&failed, &out)) };
     }
     let mut log = StageLog::new();
     let store = bundle_store::open(config);
     let bundles = store.dir().to_owned();
-    let published = store.publish(Build { parts: &parts, modules: entries, licenses, force, keep_others })?;
+    let names: Vec<ModuleName> = failed.iter().map(|(name, _)| name.clone()).collect();
+    let keep = match keep_others {
+        true => Keep::Others,
+        false if names.is_empty() => Keep::Nothing,
+        false => Keep::These(&names),
+    };
+    let published = store.publish(Build { parts: &parts, modules: entries, licenses, force, keep })?;
     let manifest = match &published {
         Published::New(manifest) => {
             writeln!(
@@ -99,11 +112,18 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
     };
     log.done("publish", matches!(published, Published::UpToDate(_)));
     stages.extend(log.into_records());
-    for m in modules {
+    for m in modules.iter().filter(|m| !names.contains(&m.describe().name)) {
         out.push_str(&m.published()?);
     }
     write_report(&config.data.dir, stages, &bundle_size(&manifest.version, &manifest.artifacts), extra)?;
-    Ok(out)
+    if failed.is_empty() { Ok(out) } else { Err(failure(&failed, &out)) }
+}
+
+/// The error of a build where some modules failed, with what the others did: an error is all that
+/// reaches who ran it.
+fn failure(failed: &[(ModuleName, GekoError)], out: &str) -> GekoError {
+    let why: Vec<String> = failed.iter().map(|(name, e)| format!("{name}: {e}")).collect();
+    GekoError::Other(format!("{out}the build failed for {}", why.join("; ")).into())
 }
 
 fn write_report(dir: &Path, stages: Vec<geko_module_sdk::stages::StageRecord>, bundle: &BundleSize, extra: serde_json::Map<String, serde_json::Value>) -> Result<()> {
@@ -129,11 +149,111 @@ pub fn regenerate(config: &Config, modules: &[Arc<dyn Module>], force: bool, ref
                 Some(line) => tracing::info!("{line}"),
                 None => tracing::info!("built: nothing to publish"),
             },
-            Err(e) => tracing::error!(error = %e, "build failed; the bundle being served stays"),
+            Err(e) => tracing::error!(error = %e, "build failed; what did not build stays as it was"),
         }
         (force, refresh) = (false, false);
         let Some(wait) = modules.iter().filter_map(|m| m.next_build()).min() else { return };
         tracing::info!(in_hours = wait.as_secs() / 3600, "next build, when a module asks for it (the geocoder: [data] max_age_days)");
         std::thread::sleep(wait.max(Duration::from_secs(1)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
+    use geko_module_sdk::bundle::current_version;
+    use geko_module_sdk::module::{Built, CONTRACT, Description};
+
+    use super::*;
+
+    /// A module that writes `content` as its part, or fails without one.
+    struct Fake {
+        name: &'static str,
+        content: Option<&'static str>,
+        work: PathBuf,
+    }
+
+    impl Module for Fake {
+        fn describe(&self) -> Description {
+            Description {
+                name: ModuleName::new(self.name).unwrap(),
+                version: "1.0.0".into(),
+                contract: CONTRACT,
+                routes: vec![],
+                openapi: None,
+                attribution: None,
+                commands: vec![],
+            }
+        }
+
+        fn build(&self, _force: bool, _refresh: bool) -> Result<Built> {
+            let content = self.content.ok_or_else(|| GekoError::Data(format!("{} cannot build", self.name)))?;
+            let from = self.work.join(self.name);
+            fs::create_dir_all(&from)?;
+            fs::write(from.join("data.bin"), content)?;
+            Ok(Built { parts: vec![BundlePart { from, to: self.name.into() }], ..Default::default() })
+        }
+    }
+
+    fn modules(work: &Path, list: &[(&'static str, Option<&'static str>)]) -> Vec<Arc<dyn Module>> {
+        list.iter().map(|(name, content)| Arc::new(Fake { name, content: *content, work: work.to_owned() }) as Arc<dyn Module>).collect()
+    }
+
+    fn config(dir: &Path) -> Config {
+        let mut config = Config::default();
+        config.data.dir = dir.to_owned();
+        config
+    }
+
+    fn published(config: &Config) -> (PathBuf, Vec<String>) {
+        let dir = bundle_store::open(config).dir().to_owned();
+        let root = dir.join(current_version(&dir).unwrap());
+        let manifest = BundleManifest::read(&root).unwrap();
+        (root, manifest.modules.iter().map(|m| m.name.to_string()).collect())
+    }
+
+    /// Two versions published within a second would have the same name.
+    fn next_second() {
+        std::thread::sleep(Duration::from_millis(1100));
+    }
+
+    #[test]
+    fn a_module_that_fails_to_build_holds_back_no_other() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config(tmp.path());
+        let work = tmp.path().join("work");
+        build(&config, &modules(&work, &[("first", Some("1")), ("second", Some("1")), ("off", Some("1"))]), false, false, false).unwrap();
+
+        // The first fails, the second comes after it and has news, and the last was turned off.
+        next_second();
+        let err = build(&config, &modules(&work, &[("first", None), ("second", Some("2"))]), false, false, false).unwrap_err().to_string();
+        assert!(err.contains("first cannot build") && err.contains("published bundle"), "it fails, and says what it published: {err}");
+        let (root, names) = published(&config);
+        assert_eq!(names, ["first", "second"], "the part of the one that failed stays, not that of one turned off");
+        assert_eq!(fs::read(root.join("second/data.bin")).unwrap(), b"2");
+        assert_eq!(fs::read(root.join("first/data.bin")).unwrap(), b"1");
+    }
+
+    #[test]
+    fn when_every_module_fails_nothing_is_published() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config(tmp.path());
+        let work = tmp.path().join("work");
+        build(&config, &modules(&work, &[("first", Some("1"))]), false, false, false).unwrap();
+        let (before, _) = published(&config);
+        next_second();
+        assert!(build(&config, &modules(&work, &[("first", None)]), false, false, false).is_err());
+        assert_eq!(published(&config).0, before);
+    }
+
+    #[test]
+    fn a_first_build_publishes_what_built() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = config(tmp.path());
+        let work = tmp.path().join("work");
+        assert!(build(&config, &modules(&work, &[("first", None), ("second", Some("1"))]), false, false, false).is_err());
+        assert_eq!(published(&config).1, ["second"]);
     }
 }
