@@ -270,6 +270,59 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check`. La SDK estrena versión propia, y los módulos pasan a `tag = "sdk-v<versión>"`.
 5. **Documentación.** `PROJECT.md`, `MODULES_PLAN.md`, `README.md`, `jekyll/` y, en `geko-context`, `AGENTS.md` y `docs/architecture.md`.
 
+### Publicación del host
+
+Decidido: publicar sigue siendo fusionar a mano el PR de `dev` a `main`. La prueba de la combinación corre en los PR que puedan afectarla y otra vez antes de publicar. El PR automático solo actualiza el fichero de versiones en `dev`.
+
+### Lista de trabajo
+
+⏸ marca una parada: alguien debe fusionar y publicar antes de seguir. Las etiquetas `contract-1` y `sdk-1` ya publicadas no se borran, porque las usan los hosts instalados y los commits antiguos de los módulos.
+
+**Fase 1: comprobar la combinación (host)**
+
+1.1. `modules.lock` en la raíz, con versión y digest de geocoder `0.3.0`, tiles `0.3.0` y router `0.1.0`.
+1.2. `ci/modules.sh pull <carpeta>`: baja cada paquete por digest y verifica firma y versión.
+1.3. Prueba que carga cada `.so` real y pasa la suite de conformidad.
+1.4. Prueba de humo: build y `serve` de Luxemburgo con los tres módulos.
+1.5. Workflow `modules.yml`, en los PR que cambien `modules.lock` o la SDK.
+1.6. El mismo trabajo como requisito de `publish.yml`.
+1.7. Workflow programado que compara el registro con `modules.lock` y abre el PR a `dev`.
+1.8. Medir cuánto tarda.
+
+**Fase 2: módulos independientes**
+
+2.1. Geocoder: validar el formato de sus datos en `load` (PR en su repositorio).
+2.2. Router: lo mismo.
+2.3. ⏸ Publicar geocoder y router, y actualizar `modules.lock`.
+2.4. Host: dejar de comparar versiones al cargar un bundle.
+2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
+2.6. Host: `/health`, `/ready` y atribución por módulo.
+2.7. Host: `[build] keep = 2` por defecto.
+2.8. Host: build independiente, en un PR aparte.
+
+**Fase 3: módulos en la imagen**
+
+3.1. `Dockerfile`: copiar a la imagen los paquetes de `modules.lock`, verificados, con `GEKO_MODULES`.
+3.2. Operador y manifiestos: una sola imagen por defecto, y revisar `geko-minik8s`.
+3.3. ⏸ Publicar el host con esa imagen y comprobarla en kind.
+3.4. Geocoder y tiles: quitar `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen.
+
+**Fase 4: borrar lo que sobra**
+
+4.1. SDK: versión propia en sus tres crates, y `publish.yml` crea `sdk-v<versión>`.
+4.2. Quitar `CONTRACT`: saludo, `Description`, bundles y `module.toml`.
+4.3. Quitar `store.rs`, `geko purge modules`, y `[modules.<m>] version` y `registry`, con un error claro si siguen en `geko.toml`.
+4.4. Quitar `ci/modules`, `ci/modules.sh check` y sus pasos en `ci.yml`, `publish.yml` y `pr-comment.yml`.
+4.5. ⏸ Publicar el host, que crea la primera `sdk-v<versión>`.
+4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`.
+4.7. ⏸ Publicar los módulos y actualizar `modules.lock`.
+
+**Fase 5: documentación**
+
+5.1. `PROJECT.md`, `MODULES_PLAN.md`, `README.md` y `jekyll/`.
+5.2. `AGENTS.md` de cada repositorio.
+5.3. `AGENTS.md` y `docs/architecture.md` de `geko-context`.
+
 ### Qué pasa con cada problema
 
 | Problemas | Resultado |
@@ -285,7 +338,6 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 ### Pendiente de decidir
 
 - **Automatización del fichero de versiones:** qué dispara el PR, y si se fusiona solo en `dev` al pasar las pruebas. El fichero no puede ir en `ci/`: `protected.yml` solo deja al propietario cambiar esa carpeta, y un PR automático fallaría.
-- **Publicación del host:** hoy `ci.yml` corre en cada PR y `publish.yml` en cada push a `main`. Propuesta: la prueba de la combinación corre en los PR que puedan afectarla y antes de publicar, y publicar sigue siendo fusionar a mano el PR de `dev` a `main`.
 - **Hash de código en tiles y router** (P9).
 - **Enlazar los módulos en un solo binario:** queda fuera de este plan. Quitaría `wire`, `Remote` y `dylib`, pero exige medir y revisar la regla de que el host no depende de ningún módulo.
 
