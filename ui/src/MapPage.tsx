@@ -3,6 +3,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { loadBase } from "./base";
 import { credits, query, type Feature } from "./geocoder";
+import { RoutePanel } from "./router/RoutePanel";
 
 const HINT = "Type to autocomplete, Enter to search. Click the map to reverse geocode; drag the pin to move the focus.";
 
@@ -22,10 +23,11 @@ const store = (key: string, value: string) => {
 interface Props {
   geocoder: boolean;
   tiles: boolean;
+  router: boolean;
   active: boolean;
 }
 
-export function MapPage({ geocoder, tiles, active }: Props) {
+export function MapPage({ geocoder, tiles, router, active }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MlMap | null>(null);
   const pinRef = useRef<Marker | null>(null);
@@ -37,6 +39,7 @@ export function MapPage({ geocoder, tiles, active }: Props) {
   const [status, setStatus] = useState(HINT);
   const [focus, setFocus] = useState(() => stored("geko.focus") !== "off");
   const [bounded, setBounded] = useState(() => stored("geko.bbox") === "on");
+  const [routing, setRouting] = useState(false);
 
   async function ask(route: string, params: Record<string, string | number>) {
     const map = mapRef.current;
@@ -69,7 +72,8 @@ export function MapPage({ geocoder, tiles, active }: Props) {
   const askRef = useRef(ask);
   askRef.current = ask;
   const liveGeocoder = useRef(geocoder);
-  liveGeocoder.current = geocoder;
+  // A click of the map goes to the directions while they are on, not to the reverse geocoder.
+  liveGeocoder.current = geocoder && !(router && routing);
   const liveBounded = useRef(bounded);
   liveBounded.current = bounded;
   const liveText = useRef(text);
@@ -163,6 +167,7 @@ export function MapPage({ geocoder, tiles, active }: Props) {
   return (
     <div class="map-page">
       <div class="map" ref={box} />
+      {router && ready && mapRef.current && <RoutePanel map={mapRef.current} on={routing} onToggle={setRouting} />}
       {geocoder && (
         <div class="search">
           <input
