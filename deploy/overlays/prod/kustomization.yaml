@@ -1,6 +1,6 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-# An example for a cluster with ReadWriteMany storage: the images of a version, more replicas of
+# An example for a cluster with ReadWriteMany storage: the image of a version, more replicas of
 # the module that has more traffic, and what each pod and each build ask for. Copy it and change it.
 namespace: geko
 resources:
@@ -10,9 +10,7 @@ configMapGenerator:
     files:
       - geko.toml
 images:
-  - name: ghcr.io/candymaps/geko-geocoder
-    newTag: latest
-  - name: ghcr.io/candymaps/geko-tiles
+  - name: ghcr.io/candymaps/geko
     newTag: latest
 replicas:
   - name: geko-geocoder

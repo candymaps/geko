@@ -95,7 +95,7 @@ is a data pack of the module, with no change to the engine.
 ```
 geko/
   openapi.yaml               routes of the host
-  Dockerfile, develop/       image ghcr.io/candymaps/geko, without modules; make start-dev
+  Dockerfile, develop/       image ghcr.io/candymaps/geko, with the modules of modules.lock; make start-dev
   ci/                        test.sh (checks), affected.sh (which ones a change needs)
   crates/
     geko-module-sdk/         the contract (Module), shared types, bundle, stages, conformance

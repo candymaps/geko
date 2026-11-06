@@ -35,9 +35,8 @@ The operator reads `geko-provisioning/` as the config map `geko`. To change the 
 
 ## What it does not do
 
-- **Pin what it cannot know.** The images are `ghcr.io/candymaps/geko:<version>` for the operator and
-  `ghcr.io/candymaps/geko-<module>:<version>` for each module. Pin a version: `latest` moves on every release, and a
-  module is not updated when the operator is.
+- **Pin what it cannot know.** The image is `ghcr.io/candymaps/geko:<version>`, for the operator and for every module.
+  Pin a version: `latest` moves on every release.
 - **Pull from a private registry.** The manifests carry no `imagePullSecret`: the cluster needs the credentials on its own.
 - **Install an Ingress controller or a storage class.** The volume that the modules share is `ReadWriteMany` unless you
   choose a cluster of one node; its class has to offer it.
@@ -69,11 +68,10 @@ To write `operator.yaml` yourself, run `geko k8s install` (see [CLI]({% link cli
 
     <fieldset>
       <legend>Version</legend>
-      <label>Tag of the images <input name="tag" value="latest" autocomplete="off"><small>Pin it, for example 0.2.0.</small></label>
+      <label>Tag of the image <input name="tag" value="latest" autocomplete="off"><small>Pin it, for example 0.2.0.</small></label>
       <details>
         <summary>Another registry</summary>
-        <label>Prefix of the modules <input name="imagePrefix" value="ghcr.io/candymaps/geko-" autocomplete="off"><small>Followed by the name of the module.</small></label>
-        <label>Image of the operator <input name="operatorImage" placeholder="ghcr.io/candymaps/geko:&lt;tag&gt;" autocomplete="off"></label>
+        <label>Image <input name="image" placeholder="ghcr.io/candymaps/geko:&lt;tag&gt;" autocomplete="off"><small>For the operator and every module.</small></label>
       </details>
     </fieldset>
 

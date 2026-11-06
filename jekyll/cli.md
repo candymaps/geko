@@ -84,8 +84,8 @@ It needs no module downloaded, nor a cluster.
 
 | Option | Default |
 |---|---|
-| `--image-prefix` | `ghcr.io/candymaps/geko-` (the image of a module is this prefix followed by its name) |
 | `--tag` | `latest` |
+| `--image` | `ghcr.io/candymaps/geko:<tag>` (the same one for the operator and every module) |
 | `--storage` | `20Gi` (size of the volume of bundles and downloads, which every module shares) |
 | `--storage-class` | the cluster default |
 

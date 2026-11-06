@@ -58,7 +58,7 @@ wizard() {
         return 0
     fi
     local options=(--tag 0.2.0 --storage 50Gi --storage-class nfs-client --access-mode ReadWriteOnce --host geko.example.org
-        --image-prefix registry.example.org/geko/geko- --operator-image registry.example.org/geko/geko:0.2.0)
+        --image registry.example.org/geko/geko:0.2.0)
     node ci/wizard-check.js "$INSTALL" || return 1
     render_to install "$1" "${options[@]}"
     node ci/wizard-check.js "$1" "${options[@]}"

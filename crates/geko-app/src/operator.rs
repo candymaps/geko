@@ -296,7 +296,6 @@ mod tests {
 
     fn options() -> k8s::Options {
         k8s::Options {
-            image_prefix: "ghcr.io/candymaps/geko-".into(),
             tag: "latest".into(),
             image: None,
             storage: "20Gi".into(),
