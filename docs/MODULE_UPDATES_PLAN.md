@@ -34,7 +34,7 @@ La prueba de humo reutiliza las descargas de la última ejecución buena, en mod
 ## Fase 2: módulos independientes
 
 - [x] 2.1. Geocoder: validar el formato de sus datos en `load`. No hace falta cambiar nada: `geocode-fst` y `reverse-rstar` ya rechazan otro formato al abrirse, y `load` no cambia lo servido hasta abrir todos los segmentos. Esa rama no tiene prueba propia.
-- [ ] 2.2. Router: lo mismo. Con `preload = true` ya lo hacía; con `preload = false` no miraba el fichero hasta la primera petición. Arreglo probado en una copia, a falta de aplicarlo en su repositorio: `/var/lib/geko/patches/router-reject-at-load.patch`.
+- [x] 2.2. Router: lo mismo. Con `preload = true` ya lo hacía; con `preload = false` no miraba el fichero hasta la primera petición. Arreglado en `dev` del router (PR #13).
 - [ ] 2.3. ⏸ Publicar el router, y actualizar `modules.lock`. El geocoder no cambia, así que no hace falta publicarlo.
 - [x] 2.4. Host: dejar de comparar versiones al cargar un bundle.
 - [x] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
@@ -53,8 +53,8 @@ Decidido al hacerlos:
 
 ## Fase 3: módulos en la imagen
 
-- [ ] 3.1. `Dockerfile`: copiar a la imagen los paquetes de `modules.lock`, ya verificados.
-- [ ] 3.2. Operador y manifiestos: una sola imagen por defecto, y revisar `geko-minik8s`.
+- [x] 3.1. `Dockerfile`: copiar a la imagen los paquetes de `modules.lock`, ya verificados. Lo hace la etapa `modules` con `ci/modules.sh pull`. La imagen pesa 212 MB, de ellos 33 MB de módulos. Comprobada en local: arranca, carga los tres por `GEKO_MODULES` y responde. Cambiar `modules.lock` ya publica imagen.
+- [x] 3.2. Operador y manifiestos: una sola imagen por defecto, y revisar `geko-minik8s`. Desaparecen `--image-prefix` y `--operator-image`: queda `--image`, para el operador y para cada módulo.
 - [ ] 3.3. ⏸ Publicar el host con esa imagen y comprobarla en kind.
 - [ ] 3.4. Geocoder y tiles: quitar `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen.
 

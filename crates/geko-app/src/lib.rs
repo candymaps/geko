@@ -113,12 +113,10 @@ enum Command {
 /// What decides the manifests of the operator mode besides the configuration.
 #[derive(clap::Args, Clone)]
 struct ManifestArgs {
-    /// The image of a module is this prefix followed by its name.
-    #[arg(long, default_value = "ghcr.io/candymaps/geko-")]
-    image_prefix: String,
     #[arg(long, default_value = "latest")]
     tag: String,
-    /// One image for every module (the one of `make start-dev`), instead of the prefix and the tag.
+    /// The image of the operator and of every module, which has them all; by default
+    /// `ghcr.io/candymaps/geko:<tag>`.
     #[arg(long)]
     image: Option<String>,
     /// Size of the volume of bundles and downloads, which every module shares.
@@ -138,7 +136,6 @@ struct ManifestArgs {
 impl ManifestArgs {
     fn options(&self) -> k8s::Options {
         k8s::Options {
-            image_prefix: self.image_prefix.clone(),
             tag: self.tag.clone(),
             image: self.image.clone(),
             storage: self.storage.clone(),
@@ -164,10 +161,6 @@ enum K8s {
     Install {
         #[command(flatten)]
         manifests: ManifestArgs,
-        /// The image that runs the operator; by default `ghcr.io/candymaps/geko:<tag>`, the one
-        /// with no module in it.
-        #[arg(long)]
-        operator_image: Option<String>,
     },
 }
 
@@ -320,9 +313,8 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             print!("{}", k8s::render(&config, &manifests.options()));
             return Ok(());
         }
-        Command::K8s { what: K8s::Install { manifests, operator_image } } => {
-            let image = operator_image.clone().unwrap_or_else(|| format!("ghcr.io/candymaps/geko:{}", manifests.tag));
-            print!("{}", k8s::install(&manifests.options(), &image));
+        Command::K8s { what: K8s::Install { manifests } } => {
+            print!("{}", k8s::install(&manifests.options()));
             return Ok(());
         }
         Command::Operator { manifests, listen, namespace } => {

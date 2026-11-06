@@ -42,7 +42,7 @@ spec:
             - "geocoder"
             - "--listen"
             - "0.0.0.0:8080"
-          image: "ghcr.io/candymaps/geko-geocoder:latest"
+          image: "ghcr.io/candymaps/geko:latest"
           livenessProbe:
             failureThreshold: 6
             httpGet:
@@ -116,7 +116,7 @@ spec:
                 - "build"
                 - "--module"
                 - "geocoder"
-              image: "ghcr.io/candymaps/geko-geocoder:latest"
+              image: "ghcr.io/candymaps/geko:latest"
               name: "geko"
               volumeMounts:
                 - mountPath: "/var/lib/geko"
@@ -163,7 +163,7 @@ spec:
             - "tiles"
             - "--listen"
             - "0.0.0.0:8080"
-          image: "ghcr.io/candymaps/geko-tiles:latest"
+          image: "ghcr.io/candymaps/geko:latest"
           livenessProbe:
             failureThreshold: 6
             httpGet:
@@ -237,7 +237,7 @@ spec:
                 - "build"
                 - "--module"
                 - "tiles"
-              image: "ghcr.io/candymaps/geko-tiles:latest"
+              image: "ghcr.io/candymaps/geko:latest"
               name: "geko"
               volumeMounts:
                 - mountPath: "/var/lib/geko"

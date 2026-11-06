@@ -79,8 +79,9 @@ And for all of them:
 - one `PersistentVolumeClaim`, `ReadWriteMany`, for bundles and downloads;
 - one `Ingress` that sends `/<module>/` to its service.
 
-The images are `ghcr.io/candymaps/geko-<module>`, one per module: the host with that module linked into
-it. Options of `render`: `--image-prefix`, `--tag`, `--storage` (default `20Gi`) and `--storage-class`.
+The image is `ghcr.io/candymaps/geko`, the same for every module: it has them all, and each pod loads only
+its own (`--module`). Options of `render`: `--tag`, `--image`, `--storage` (default `20Gi`) and
+`--storage-class`.
 See the [CLI]({% link cli.md %}).
 
 ### Probes

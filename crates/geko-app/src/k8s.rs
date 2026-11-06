@@ -12,11 +12,9 @@ use serde_json::{Map, Value, json};
 use crate::config::{Config, ModuleDeploy};
 
 pub struct Options {
-    /// Where the image of a module is: the prefix followed by the name of the module.
-    pub image_prefix: String,
     pub tag: String,
-    /// One image for every module (the one of `make start-dev`, which has them all), instead of
-    /// the prefix and the tag.
+    /// The image of the operator and of every module, which has them all; `ghcr.io/candymaps/geko`
+    /// with the tag by default.
     pub image: Option<String>,
     /// Size of the volume of bundles and downloads, and how it is mounted: every module reads and
     /// writes it, from other nodes, so `ReadWriteMany`, unless the cluster has a single node.
@@ -28,6 +26,12 @@ pub struct Options {
     pub dashboard: Option<String>,
     /// The host name that the Ingress answers for; any when none.
     pub host: Option<String>,
+}
+
+impl Options {
+    fn image(&self) -> String {
+        self.image.clone().unwrap_or_else(|| format!("ghcr.io/candymaps/geko:{}", self.tag))
+    }
 }
 
 /// The volume that every module shares at `/var/lib/geko`, as it does in the single mode.
@@ -70,11 +74,11 @@ pub fn manifests(config: &Config, options: &Options) -> Vec<Value> {
 /// What the operator needs to run in a cluster, as manifests (`geko k8s install`): the account with
 /// the permissions to manage what `manifests` makes, its deployment, and the service of the
 /// dashboard that it serves.
-pub fn install(options: &Options, operator_image: &str) -> String {
+pub fn install(options: &Options) -> String {
     let labels = json!({ "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator", "app.kubernetes.io/part-of": "geko" });
     let selector = json!({ "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator" });
-    let mut args = vec!["operator".to_owned(), "--listen".into(), format!("0.0.0.0:{PORT}"), "--image-prefix".into(), options.image_prefix.clone()];
-    args.extend(["--tag".into(), options.tag.clone(), "--storage".into(), options.storage.clone()]);
+    let mut args = vec!["operator".to_owned(), "--listen".into(), format!("0.0.0.0:{PORT}"), "--tag".into(), options.tag.clone()];
+    args.extend(["--storage".into(), options.storage.clone()]);
     args.extend(["--access-mode".into(), options.access_mode.clone()]);
     if let Some(class) = &options.storage_class {
         args.extend(["--storage-class".into(), class.clone()]);
@@ -126,7 +130,7 @@ pub fn install(options: &Options, operator_image: &str) -> String {
                         "serviceAccountName": OPERATOR,
                         "containers": [{
                             "name": "geko",
-                            "image": operator_image,
+                            "image": options.image(),
                             "args": args,
                             "ports": [{ "name": "http", "containerPort": PORT }],
                             // It reads the configuration of the dashboard (keys, listen) from the
@@ -194,10 +198,10 @@ fn resources(cpu: Option<&str>, memory: Option<&str>) -> Option<Value> {
     (!resources.is_empty()).then(|| resources.into())
 }
 
-fn container(module: &str, args: &[&str], resources: Option<Value>, options: &Options) -> Value {
+fn container(args: &[&str], resources: Option<Value>, options: &Options) -> Value {
     let mut container = json!({
         "name": "geko",
-        "image": options.image.clone().unwrap_or_else(|| format!("{}{module}:{}", options.image_prefix, options.tag)),
+        "image": options.image(),
         "args": args,
         "volumeMounts": [
             { "name": "data", "mountPath": "/var/lib/geko" },
@@ -222,7 +226,6 @@ fn deployment(module: &ModuleName, deploy: Option<&ModuleDeploy>, options: &Opti
     let name = module.as_str();
     let listen = format!("0.0.0.0:{PORT}");
     let mut container = container(
-        name,
         &["serve", "--module", name, "--listen", &listen],
         resources(deploy.and_then(|d| d.cpu.as_deref()), deploy.and_then(|d| d.memory.as_deref())),
         options,
@@ -263,7 +266,6 @@ fn service(module: &ModuleName) -> Value {
 fn build(module: &ModuleName, deploy: Option<&ModuleDeploy>, options: &Options, max_age_days: u64, index: usize) -> Value {
     let name = module.as_str();
     let container = container(
-        name,
         &["build", "--module", name],
         resources(deploy.and_then(|d| d.build_cpu.as_deref()), deploy.and_then(|d| d.build_memory.as_deref())),
         options,
@@ -388,7 +390,6 @@ mod tests {
 
     fn options() -> Options {
         Options {
-            image_prefix: "ghcr.io/candymaps/geko-".into(),
             tag: "latest".into(),
             image: None,
             storage: "20Gi".into(),
@@ -422,8 +423,8 @@ mod tests {
         for module in ["geocoder", "tiles"] {
             assert!(out.contains(&format!("name: \"geko-{module}\"\n")), "{module}");
             assert!(out.contains(&format!("name: \"geko-build-{module}\"\n")), "{module}");
-            assert!(out.contains(&format!("image: \"ghcr.io/candymaps/geko-{module}:latest\"\n")), "{module}");
         }
+        assert_eq!(out.matches("image: \"ghcr.io/candymaps/geko:latest\"\n").count(), 4, "the same one to serve and to build each");
         // One serves and one builds, each only its own module.
         assert_eq!(out.matches("- \"serve\"\n").count(), 2);
         assert_eq!(out.matches("- \"build\"\n").count(), 2);
@@ -463,11 +464,13 @@ mod tests {
     }
 
     #[test]
-    fn one_image_serves_for_every_module() {
+    fn another_image_serves_for_every_module_and_the_operator() {
         let config = Config::parse("").unwrap();
         let out = render(&config, &Options { image: Some("geko:dev".into()), ..options() });
         assert_eq!(out.matches("image: \"geko:dev\"\n").count(), 4, "two to serve and two to build");
         assert!(!out.contains("ghcr.io"));
+        let out = install(&Options { image: Some("geko:dev".into()), ..options() });
+        assert!(out.contains("image: \"geko:dev\"\n") && out.contains("- \"--image\"\n"));
     }
 
     #[test]
@@ -489,7 +492,7 @@ mod tests {
 
     #[test]
     fn the_operator_installs_with_the_permissions_it_needs_and_none_to_delete_the_volume() {
-        let out = install(&Options { storage_class: Some("nfs".into()), ..options() }, "ghcr.io/candymaps/geko:latest");
+        let out = install(&Options { storage_class: Some("nfs".into()), ..options() });
         for kind in ["ServiceAccount", "Role", "RoleBinding", "Deployment", "Service"] {
             assert!(out.contains(&format!("kind: \"{kind}\"\n")), "{kind}");
         }

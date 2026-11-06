@@ -8,7 +8,7 @@ const path = require("node:path");
 const wizard = require("../jekyll/assets/js/geko-wizard.js");
 
 const [file, ...rest] = process.argv.slice(2);
-const names = { "--tag": "tag", "--storage": "storage", "--storage-class": "storageClass", "--access-mode": "accessMode", "--host": "host", "--image-prefix": "imagePrefix", "--operator-image": "operatorImage" };
+const names = { "--tag": "tag", "--storage": "storage", "--storage-class": "storageClass", "--access-mode": "accessMode", "--host": "host", "--image": "image" };
 const options = {};
 for (let i = 0; i < rest.length; i += 2) {
   if (!names[rest[i]]) throw new Error(`unknown option ${rest[i]}`);

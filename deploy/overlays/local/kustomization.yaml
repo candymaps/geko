@@ -17,8 +17,8 @@ configMapGenerator:
   - name: gateway
     files:
       - gateway.conf
-# The image of `make start-dev` (geko with both modules, loaded into the cluster) is that of the
-# operator and, through its `--image`, that of each module.
+# The image of `make start-dev` (loaded into the cluster), for the operator and, through its
+# `--image`, for each module.
 images:
   - name: ghcr.io/candymaps/geko
     newName: geko
