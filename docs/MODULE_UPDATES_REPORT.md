@@ -219,7 +219,8 @@ Acordado el 2026-11-06, tras este análisis. Sustituye a la idea de resolver ver
 - **Solo se elige la versión del host.** Cada versión del host fija la versión exacta de cada módulo, y no se puede cambiar.
 - **Los módulos van dentro de la imagen.** Los tres suman unos 32 MiB, y Docker es la única distribución. En ejecución no se descarga ningún módulo.
 - **La compatibilidad de código se comprueba antes de publicar,** no en cada instalación. Por eso no hacen falta `CONTRACT` ni etiquetas de SDK.
-- **La compatibilidad de datos se mantiene,** porque bundles y packs no se publican con el host.
+- **La compatibilidad de datos se mantiene,** porque bundles y packs no se publican con el host. La de los bundles la decide cada módulo al cargarlos.
+- **Los módulos son independientes:** un módulo listo se sirve sin esperar a los demás, y el fallo de uno no afecta a otro.
 
 ### Flujo
 
@@ -259,8 +260,12 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 ### Fases
 
 1. **Comprobar la combinación.** Fichero de versiones y trabajo de CI del paso 4, sin cambiar nada más. Medir cuánto tarda.
-2. **Arreglar la carga de bundles.** Un número de formato de datos por módulo sustituye a la igualdad exacta de versión, en todos los modos, y la carga pasa a ser en dos fases: se comprueban todos los módulos antes de cargar ninguno, y un bundle rechazado no se reintenta en cada recarga. `/ready` y `/health` dejan claro cuándo no hay bundle. Debe ir antes que la fase 3: sin ella, actualizar el host da 503 hasta terminar el build.
-3. **Módulos en la imagen.** Una sola imagen, también para el operador (`--image`), y fuera las imágenes por módulo.
+2. **Módulos independientes y sin igualdad de versión.** Debe ir antes que la fase 3: sin ella, actualizar el host da 503 hasta terminar el build.
+   - **El host deja de comparar versiones.** Cada módulo valida en `load` que sabe leer sus datos, como ya hace tiles con `tileset::FORMAT`; hay que revisar el geocoder y el router. Es asunto del módulo: el host y la SDK no conocen ningún formato. Si el módulo puede leerlo, sirve el bundle al momento y se reconstruye en segundo plano.
+   - **Carga independiente por módulo.** Cada módulo tiene su estado (bundle cargado y último error) y carga cuando puede: si uno falla, los demás sirven el bundle nuevo, y el que falla sigue con el anterior o da 503 solo en sus rutas. Un bundle rechazado no se reintenta en ese módulo hasta que haya otro.
+   - **`/health`, `/ready` y la atribución, por módulo.**
+   - **Build independiente, en un PR aparte.** Si un módulo devuelve un error, se sigue con los demás y se publica lo que haya salido bien, conservando la parte anterior del que falló (como `keep_others`, sin comprobar aún que sirva tal cual). El build termina con error, para que el fallo no pase desapercibido. Un fallo grave, como un segfault, sigue tirando el proceso. No tiene que ver con las actualizaciones, y el resto del plan no depende de él.
+3. **Módulos en la imagen.** Una sola imagen, también para el operador (`--image`), y fuera las imágenes por módulo. Los módulos no se compilan en el host: siguen siendo `.so` separadas, compiladas en su repositorio y cargadas al arrancar. En Kubernetes sigue habiendo un pod por módulo (`--module`). Como consecuencia, cada versión del host reinicia los pods de todos los módulos, aunque solo cambie uno.
 4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check`. La SDK estrena versión propia, y los módulos pasan a `tag = "sdk-v<versión>"`.
 5. **Documentación.** `PROJECT.md`, `MODULES_PLAN.md`, `README.md`, `jekyll/` y, en `geko-context`, `AGENTS.md` y `docs/architecture.md`.
 
@@ -268,7 +273,7 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 
 | Problemas | Resultado |
 | --- | --- |
-| P1 | Desaparece al reiniciar. Al actualizar el host, lo resuelve el formato de datos (fase 2) |
+| P1 | Desaparece al reiniciar. Al actualizar el host, lo resuelve que cada módulo valide sus datos (fase 2) |
 | P3, P5, P6, P8, P10, P12, P13, P15, P16, P17, P18 | Desaparecen: solo hay una versión posible, fijada por digest y probada antes |
 | P4 | Desaparece para módulos. El host no los descarga |
 | P11 | Sustituido por la prueba de la fase 1 |
