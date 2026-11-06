@@ -75,3 +75,7 @@ Por ahora el dashboard no cambia nada. Las acciones (reconstruir, recargar bundl
 3. **Compartir Preact** entre shell y paneles (*import map*) o paneles autocontenidos.
 4. **Brotli o gzip** para los estáticos incrustados, según la medida de tamaño y el coste de CPU al arrancar.
 5. **Limitar el mapa al ámbito.** Se probó (2026-10-26) que cada módulo declarase el área de su parte (`Built::bounds`) y que el host las uniera y las sirviera; se retiró. El host solo tiene el ámbito como códigos ISO, sin geometría, y no conoce las fuentes de cada módulo. Si se retoma, hace falta una fuente común de cajas por región; una sola caja, además, deja huecos con ámbitos separados (Baleares y Canarias).
+
+## Estilos propios de tiles (2026-11-04)
+
+La pestaña Styles de tiles edita los estilos del usuario como JSON de MapLibre, con las rutas `POST /tiles/styles/custom/{name}/save` y `delete` del módulo. Solo escribe con `[styles] editable` en `geko-tiles.toml`. **Pendiente:** el panel no envía API key, así que con `[serve] api_keys` no puede leer `/tiles/` ni guardar; y no hay vista previa del mapa.

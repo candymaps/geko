@@ -78,15 +78,17 @@ El almacenamiento de bundles del modo operador es un `PVC` con acceso `ReadWrite
 
 ### Una imagen por módulo (2026-10-26)
 
-El operador despliega, para cada módulo, la imagen `ghcr.io/candymaps/geko-<módulo>`: el host con ese módulo enlazado mediante `geko_app::main(linked)`, como ya hace `crates/geko-host` del geocoder para sus checks. El operador resuelve la etiqueta por contrato (la más nueva del contrato de geko, o la fijada con `version`).
+El operador despliega, para cada módulo, la imagen `ghcr.io/candymaps/geko-<módulo>`: la imagen `ghcr.io/candymaps/geko` con el paquete de ese módulo en `GEKO_MODULES` (`ci/image.Dockerfile` de cada módulo). La publica cada módulo desde su repositorio, junto al paquete y en el mismo repositorio del registro (`ci/modules.sh image` y `push-image`): `<versión>-<commit>` y, en una release, `<versión>` y `latest`. No chocan con el paquete, cuyas etiquetas acaban en la plataforma y que el host pide por su nombre exacto. La imagen se comprueba antes de publicarla: `geko plan` tiene que cargar el módulo, y el host rechaza uno de otro contrato. El operador resuelve la etiqueta por contrato (la más nueva del contrato de geko, o la fijada con `version`).
+
+Se pensó en enlazar el módulo con `geko_app::main(linked)`, como `crates/geko-host` del geocoder para sus checks. Se cambió (2026-11-03) por el paquete: enlazarlo obligaría a compilar el host entero en cada módulo y a que tiles dependa de `geko-app`, que su regla de arquitectura prohíbe, y `DylibModule` no cuesta nada frente a enlazado. El proceso es de un solo módulo, así que si este cae no arrastra a otro.
 
 - **Por qué:** cada módulo vive en su repositorio y se publica a su ritmo; una imagen única obligaría a juntar los repositorios en cada release. Así también se cumple la actualización por separado y cada pod solo lleva el código de su módulo.
-- **Coste asumido:** la versión del host va dentro de cada imagen, así que un cambio del host exige reconstruir las de cada módulo. El contrato (`sdk-<contrato>`) ya obliga a coordinarlos.
+- **Coste asumido:** la versión del host va dentro de cada imagen, así que un cambio del host exige reconstruir las de cada módulo. El contrato (`sdk-<contrato>`) ya obliga a coordinarlos. Cada módulo lo comprueba solo: su workflow `refresh-image`, una vez al día, compara la imagen de geko con la que lleva su `latest` y, si es otra, rehace la imagen con el mismo paquete, sin compilar nada, y la publica si `geko plan` sigue cargando el módulo. Un host de otro contrato no pasa esa prueba y la imagen se queda como estaba.
 - **Descartada:** una imagen `geko` con todos los módulos enlazados, con `--module <módulo>` en cada `Deployment`. Una sola imagen que publicar, pero más grande, con las versiones de los módulos atadas a las del host.
 
 ### `DylibModule` y la descarga de módulos firmados se mantienen (2026-10-26)
 
-No se quitan. Con una imagen por módulo, el modo `operator` ya no los usa, pero `single` sí: es la forma de tener en un solo `docker run` módulos que se publican por separado. Quitarlos obligaría a `single` a usar una imagen combinada, justo lo descartado arriba. Funciona y está medido (sin coste frente a enlazado). Se puede reabrir cuando el operador exista y se vea cuánto se usan.
+No se quitan. El modo `operator` usa `DylibModule` para cargar el paquete que lleva cada imagen, pero no la descarga; `single` usa los dos: es la forma de tener en un solo `docker run` módulos que se publican por separado. Quitarlos obligaría a `single` a usar una imagen combinada, justo lo descartado arriba. Funciona y está medido (sin coste frente a enlazado). Se puede reabrir cuando el operador exista y se vea cuánto se usan.
 
 ### Las rutas comunes las sirve cada módulo (2026-10-26)
 
