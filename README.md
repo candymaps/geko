@@ -103,7 +103,7 @@ accept_licenses    = false          # required to download: review the licenses 
 parallel_downloads = 4              # downloads at the same time
 
 [build]
-keep = 1                            # published versions kept (2 to be able to roll back)
+keep = 2                            # published versions kept (2 to be able to roll back)
 
 [serve]
 listen                 = "127.0.0.1:8080"   # in Docker, always 0.0.0.0:8080
@@ -130,7 +130,9 @@ mode = "single"                     # single: every module in one process, where
 
 `geko serve --module geocoder` (`--module` is an alias of `--modules`) serves only the routes of that module, and `geko build --module geocoder` builds only its part. The bundle that build publishes keeps what the current one has of the other modules, so each module can build in a job of its own, with its own resources; publications into the same bundles directory wait for each other (`.publish.lock`). A build with no `--module` publishes exactly the modules that are active, as before.
 
-Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200 from then on. They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
+Two probes tell a process apart: `/health` answers from the start (it is alive, also while it builds), and `/ready` answers 503 until every module served there has loaded its part of a bundle, and 200 from then on (`/ready?module=geocoder` asks about one alone). They are the liveness and readiness probes of a pod (docs/OPERATOR_MODE_PLAN.md). Neither needs an API key.
+
+Modules go on their own. Each one serves as soon as it has loaded its part, and decides whether it can read it. One that rejects a new bundle goes on with the one it had, says why in `/health`, and does not try that bundle again; the others load it. When the build of a module fails, the others publish, the bundle keeps the part it had, and `geko build` ends in that error.
 
 To develop it as it runs in Kubernetes, put `[deploy] mode = "operator"` in the configuration of `make start-dev` (`develop/geko.toml`, or `DEV_CONFIG=…`): the same command then makes a local kind cluster (`geko-dev`) if there is none, loads the image into it, applies the manifests that `geko k8s render` writes from that configuration (a pod per module, a build job per module, one volume for the data, `deploy/`), builds each module one after the other, and serves it all at the same `http://localhost:8080/`. `make stop-dev` deletes what runs and keeps the cluster and its volume; `make stop-dev PURGE=1` deletes the cluster. It needs `docker`, `kind` and `kubectl`, and says so if one is missing. The `operator` workflow runs this on Luxembourg, and `ci/operator.sh` checks that a module that falls does not take the other with it and that each scales on its own.
 

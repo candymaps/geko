@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use geko_module_sdk::bundle::{Artifact, BundleManifest, BundleModule, CURRENT, CURRENT_VERSION, FORMAT, LicenseNotice, MANIFEST, current_version};
 use geko_module_sdk::download::{Checksum, DownloadRequest, Downloader};
 use geko_module_sdk::incremental::{self, Key, Stamp};
-use geko_module_sdk::module::BundlePart;
+use geko_module_sdk::module::{BundlePart, ModuleName};
 use geko_module_sdk::{GekoError, Result};
 use sha2::{Digest, Sha256};
 
@@ -113,14 +113,33 @@ fn top(path: &str) -> &str {
     path.split(['/', '\\']).next().unwrap_or(path)
 }
 
-/// What the current bundle has of the modules that `own` does not name; `None` when there is no
-/// current bundle or it has no other module. Licenses of a source that `own` licenses again are
-/// not kept twice.
-pub fn kept(bundles: &Path, own: &[BundleModule], parts: &[BundlePart], licenses: &[LicenseNotice]) -> Result<Option<Kept>> {
+/// What a new version keeps of the modules that were not built for it.
+#[derive(Clone, Copy)]
+pub enum Keep<'a> {
+    /// Nothing: a module that was turned off in the configuration leaves the bundle.
+    Nothing,
+    /// All the others (a build of some modules, `--module`).
+    Others,
+    /// These alone, whose build failed. The files and licenses of a module that was turned off stay
+    /// until a build with nothing to keep: the manifest does not say whose they are.
+    These(&'a [ModuleName]),
+}
+
+/// What the current bundle has of the modules that `own` does not name and `keep` asks for; `None`
+/// when there is no current bundle or it has no such module. Licenses of a source that `own`
+/// licenses again are not kept twice.
+pub fn kept(bundles: &Path, own: &[BundleModule], parts: &[BundlePart], licenses: &[LicenseNotice], keep: Keep) -> Result<Option<Kept>> {
+    if matches!(keep, Keep::Nothing) {
+        return Ok(None);
+    }
     let Some(version) = current_version(bundles) else { return Ok(None) };
     let from = bundles.join(&version);
     let previous = BundleManifest::read(&from)?;
-    let modules: Vec<BundleModule> = previous.modules.into_iter().filter(|m| !own.iter().any(|o| o.name == m.name)).collect();
+    let wanted = |m: &BundleModule| match keep {
+        Keep::These(names) => names.contains(&m.name),
+        Keep::Nothing | Keep::Others => true,
+    };
+    let modules: Vec<BundleModule> = previous.modules.into_iter().filter(|m| !own.iter().any(|o| o.name == m.name) && wanted(m)).collect();
     if modules.is_empty() {
         return Ok(None);
     }
@@ -230,8 +249,8 @@ pub enum Published {
 
 /// Publishes a new version unless the current one was published from the same parts, modules and
 /// licenses, or `force`. A new version with the same content would only make every server reload
-/// for nothing. With `keep_others`, the new version also has what the current one holds of the
-/// modules not in `modules` (see `Kept`).
+/// for nothing. The new version also has what `others` asks for of what the current one holds of
+/// the modules not in `modules` (see `Kept`).
 pub fn publish_incremental(
     bundles: &Path,
     parts: &[BundlePart],
@@ -239,7 +258,7 @@ pub fn publish_incremental(
     licenses: Vec<LicenseNotice>,
     keep: usize,
     force: bool,
-    keep_others: bool,
+    others: Keep,
 ) -> Result<Published> {
     fn json(v: &impl serde::Serialize) -> Result<String> {
         serde_json::to_string(v).map_err(|e| GekoError::Other(e.into()))
@@ -247,7 +266,7 @@ pub fn publish_incremental(
     // Reading `current` to keep what it has and publishing the new one is one step: no other build
     // may publish in between.
     let _lock = PublishLock::acquire(bundles)?;
-    let kept = if keep_others { kept(bundles, &modules, parts, &licenses)? } else { None };
+    let kept = kept(bundles, &modules, parts, &licenses, others)?;
     let mut key = Key::new("publish").add("modules", &json(&modules)?).add("licenses", &json(&licenses)?);
     for part in parts {
         let part = checked(part)?;
@@ -476,7 +495,7 @@ mod tests {
         let parts = parts(work.path());
         let publish = |modules: &[&str], force| {
             let modules = modules.iter().map(|m| module(m)).collect();
-            publish_incremental(&bundles, &parts, modules, vec![], 5, force, false).unwrap()
+            publish_incremental(&bundles, &parts, modules, vec![], 5, force, Keep::Nothing).unwrap()
         };
 
         // Versions are named by the second: wait for a new name before a new publication.

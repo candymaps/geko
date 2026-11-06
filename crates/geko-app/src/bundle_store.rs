@@ -11,7 +11,7 @@ use geko_module_sdk::bundle::{BundleModule, LicenseNotice};
 use geko_module_sdk::download::Downloader;
 use geko_module_sdk::module::BundlePart;
 
-use crate::bundle::{self, Published};
+use crate::bundle::{self, Keep, Published};
 use crate::config::Config;
 
 /// What a build publishes.
@@ -21,9 +21,9 @@ pub struct Build<'a> {
     pub licenses: Vec<LicenseNotice>,
     /// Publish even if the current version has the same content.
     pub force: bool,
-    /// Keep what the current version has of the modules not in `modules`: the build of one module
-    /// (`--module`) does not drop the others'.
-    pub keep_others: bool,
+    /// What to keep of what the current version has of the modules not in `modules`: the build of
+    /// one module (`--module`) does not drop the others', nor a failed one its own.
+    pub keep: Keep<'a>,
 }
 
 pub trait BundleStore: Send + Sync {
@@ -62,7 +62,7 @@ impl BundleStore for Local {
     }
 
     fn publish(&self, build: Build) -> Result<Published> {
-        bundle::publish_incremental(&self.dir, build.parts, build.modules, build.licenses, self.keep, build.force, build.keep_others)
+        bundle::publish_incremental(&self.dir, build.parts, build.modules, build.licenses, self.keep, build.force, build.keep)
     }
 
     fn sync(&self) -> Result<Option<String>> {
@@ -151,7 +151,7 @@ mod tests {
     }
 
     fn build(parts: &[BundlePart], modules: Vec<BundleModule>, keep_others: bool) -> Build<'_> {
-        Build { parts, modules, licenses: vec![], force: false, keep_others }
+        Build { parts, modules, licenses: vec![], force: false, keep: if keep_others { Keep::Others } else { Keep::Nothing } }
     }
 
     /// Versions are named by the second: wait for a new name before a new publication.

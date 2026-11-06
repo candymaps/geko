@@ -1,6 +1,6 @@
 # Plan de actualización de módulos
 
-Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
+Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub; fase 2 hecha en el host, a falta de publicar geocoder y router (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
 
 **Objetivo:** solo se elige la versión del host, y ella decide exactamente qué módulos lleva. La compatibilidad de código se comprueba al publicar, y cada módulo funciona de forma independiente.
 
@@ -36,11 +36,20 @@ La prueba de humo reutiliza las descargas de la última ejecución buena, en mod
 - [ ] 2.1. Geocoder: validar el formato de sus datos en `load`.
 - [ ] 2.2. Router: lo mismo.
 - [ ] 2.3. ⏸ Publicar geocoder y router, y actualizar `modules.lock`.
-- [ ] 2.4. Host: dejar de comparar versiones al cargar un bundle.
-- [ ] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
-- [ ] 2.6. Host: `/health`, `/ready` y atribución por módulo.
-- [ ] 2.7. Host: `[build] keep = 2` por defecto.
-- [ ] 2.8. Host: build independiente, en un PR aparte.
+- [x] 2.4. Host: dejar de comparar versiones al cargar un bundle.
+- [x] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
+- [x] 2.6. Host: `/health`, `/ready` y atribución por módulo.
+- [x] 2.7. Host: `[build] keep = 2` por defecto.
+- [x] 2.8. Host: build independiente, en un PR aparte.
+
+Pasos 2.4 a 2.8 hechos sin PR, por decisión del 2026-11-06: **el host no se publica antes del paso 2.3**, porque deja en manos de cada módulo validar sus datos. El build independiente va en su propio commit, para poder separarlo.
+
+Decidido al hacerlos:
+
+- `CONTRACT` se sigue comparando hasta el paso 4.2, pero ya solo rechaza al módulo afectado.
+- `/ready` sigue diciendo si puede responder todo el proceso, y `/ready?module=<m>` pregunta por uno solo.
+- `geko serve` escucha desde el principio y carga en segundo plano, con todos los módulos a la vez. Hasta que un módulo carga, responde 503 en sus rutas.
+- Un build fallido conserva solo la parte de los módulos que fallaron, no la de los desactivados. Sus ficheros y licencias siguen hasta el siguiente build sin fallos, porque el manifiesto no dice de quién son.
 
 ## Fase 3: módulos en la imagen
 
