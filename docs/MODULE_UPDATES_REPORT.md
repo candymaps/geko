@@ -232,20 +232,24 @@ Se usan los binarios publicados, y no una compilación en el host, para distribu
 
 ### La SDK
 
-El crate `geko-module-sdk` se queda: es la interfaz que implementan los módulos, y sin él no compilan. Deja de ser un producto versionado:
+El crate `geko-module-sdk` se queda, con `geko-fetch` y `geko-artifact`: son la interfaz que implementan los módulos, y sin ellos no compilan. Siguen en este repositorio, pero con releases propias:
 
 ```toml
-geko-module-sdk = { git = "https://github.com/candymaps/geko.git", branch = "dev" }
+geko-module-sdk = { git = "https://github.com/candymaps/geko.git", tag = "sdk-v0.4.0" }
 ```
 
-Una etiqueta de release del host no sirve aquí: el host `v<n>` fija módulos ya publicados, y si esos módulos necesitan algo nuevo de la SDK, deben compilarse antes de que exista `v<n>`. Seguir `dev` evita esa dependencia circular. La compilación sigue siendo reproducible, porque `Cargo.lock` guarda el commit y la CI compila con `--locked`; se pasa a una SDK nueva con `cargo update` cuando se quiere.
+- **Versión propia:** hoy comparten la del workspace del host. Pasan a tener una independiente.
+- **Etiquetas inmutables:** `sdk-v<versión>` sustituye a `sdk-<n>`, que hoy se mueve con `git tag -f`. Se crea al subir la versión de la SDK.
+- **El orden evita dependencias circulares:** primero sale la SDK, luego los módulos la adoptan y publican, y por último el host fija esos módulos. Una etiqueta de release del host no serviría, porque los módulos deben compilarse antes de que esa release exista.
+- **Solo se usa al compilar:** en ejecución no hay comprobación de compatibilidad. La garantiza la prueba de la CI del host.
+- **Para probar sin publicar,** `make start-dev` ya compila con la SDK del árbol.
 
 ### Qué se elimina y qué se queda
 
 | Se elimina | Se queda |
 | --- | --- |
 | `CONTRACT`, el saludo con contrato y `contract` en bundles y `module.toml` | El crate `geko-module-sdk` |
-| Etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check` | Los paquetes firmados de los módulos, verificados al construir la imagen |
+| Etiquetas `contract-<n>` y `sdk-<n>` (esta, sustituida por `sdk-v<versión>`), y `ci/modules.sh check` | Los paquetes firmados de los módulos, verificados al construir la imagen |
 | `store.rs`, y `[modules.<m>] version` y `registry` (con un error claro si siguen en `geko.toml`) | Los packs de país, su `format-<n>` y su firma |
 | `geko purge modules` | `GEKO_MODULES`, para la imagen y para desarrollo |
 | Las imágenes por módulo y `refresh-image.yml` | El formato del manifiesto del bundle |
@@ -257,7 +261,7 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 1. **Comprobar la combinación.** Fichero de versiones y trabajo de CI del paso 4, sin cambiar nada más. Medir cuánto tarda.
 2. **Arreglar la carga de bundles.** Un número de formato de datos por módulo sustituye a la igualdad exacta de versión, en todos los modos, y la carga pasa a ser en dos fases: se comprueban todos los módulos antes de cargar ninguno, y un bundle rechazado no se reintenta en cada recarga. `/ready` y `/health` dejan claro cuándo no hay bundle. Debe ir antes que la fase 3: sin ella, actualizar el host da 503 hasta terminar el build.
 3. **Módulos en la imagen.** Una sola imagen, también para el operador (`--image`), y fuera las imágenes por módulo.
-4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas y `ci/modules.sh check`. Los módulos pasan a `branch = "dev"`.
+4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check`. La SDK estrena versión propia, y los módulos pasan a `tag = "sdk-v<versión>"`.
 5. **Documentación.** `PROJECT.md`, `MODULES_PLAN.md`, `README.md`, `jekyll/` y, en `geko-context`, `AGENTS.md` y `docs/architecture.md`.
 
 ### Qué pasa con cada problema
@@ -277,6 +281,10 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 - **`[build] keep`:** con `1` no se puede volver al bundle anterior tras actualizar el host; con `2` sí, a costa de disco.
 - **Automatización del fichero de versiones:** qué dispara el PR y si la release del host es automática o la lanza alguien.
 - **Enlazar los módulos en un solo binario:** queda fuera de este plan. Quitaría `wire`, `Remote` y `dylib`, pero exige medir y revisar la regla de que el host no depende de ningún módulo.
+
+### Deseable, sin planificar
+
+**Extraer la SDK a un repositorio `geko-sdk`.** No forma parte de este plan, ni como paso final, y no tiene fecha. Daría etiquetas normales (`v0.4.0`), versión independiente sin tocar el workspace del host y una dependencia más clara: host y módulos dependerían de `geko-sdk`, y ningún módulo del host. Es viable, porque `geko-module-sdk`, `geko-fetch` y `geko-artifact` no dependen de ningún crate del host. El freno es que un cambio en la SDK y el host pasaría de un PR a dos y una release, y eso es hoy lo habitual: 5 de los 6 commits que tocaron esos crates desde el 2026-10-22 tocaron también crates del host. Conviene retomarlo si esa proporción baja.
 
 ## 10. Cómo se comprobó
 
