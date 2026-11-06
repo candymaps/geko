@@ -14,6 +14,7 @@ The modules available:
 
 - [Geocoder]({% link geocoder.md %}): addresses and places into coordinates, and back.
 - [Tiles]({% link tiles.md %}): vector tiles of the scope, with styles, fonts and sprites.
+- [Router]({% link router.md %}): routes, matrices and the nearest street.
 
 To write a new one, see [Writing a module]({% link writing-a-module.md %}).
 

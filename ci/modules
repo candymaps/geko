@@ -4,3 +4,4 @@
 # ghcr.io/candymaps/geko-<module>.
 geocoder
 tiles
+router
