@@ -22,7 +22,8 @@ A modular, multi-country geospatial engine. Each service is a module, enabled in
 
 - **Geocoding** (available, [geko-geocoder](https://github.com/candymaps/geko-geocoder)): turns addresses and place names into coordinates (search and autocomplete), and coordinates into addresses (reverse).
 - **Vector tiles** (available, [geko-tiles](https://github.com/candymaps/geko-tiles)): vector tiles of the scope, with the Protomaps styles, their fonts and sprites.
-- **Routing…** (planned): new modules that plug in without changing the others.
+- **Routing** (optional, [geko-router](https://github.com/candymaps/geko-router)): routes, matrices and the nearest street on the roads of the scope, with live traffic as an option.
+- More to come: new modules plug in without changing the others.
 
 They all share the same foundation:
 

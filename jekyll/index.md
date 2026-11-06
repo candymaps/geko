@@ -15,7 +15,9 @@ Each module lives in its own repository:
 
 - the geocoder, in [candymaps/geko-geocoder](https://github.com/candymaps/geko-geocoder), with the
   country packs;
-- tiles, in [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles).
+- tiles, in [candymaps/geko-tiles](https://github.com/candymaps/geko-tiles);
+- the router, in [candymaps/geko-router](https://github.com/candymaps/geko-router), with its
+  country packs.
 
 ## Where to go
 
