@@ -6,6 +6,8 @@ export interface ModuleInfo {
   name: string;
   version: string;
   unavailable: string | null;
+  /** What is wrong with a module that does answer; only the operator says it. */
+  warning?: string | null;
 }
 
 async function get<T>(path: string, mode: Mode): Promise<T> {

@@ -2,7 +2,7 @@ import { Route as RouteIcon } from "lucide-preact";
 import maplibregl, { type GeoJSONSource, type Map as MlMap, type MapMouseEvent, type Marker } from "maplibre-gl";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { number } from "../panel";
-import { findRoutes, graphBounds, type Point, type Routes } from "./api";
+import { findRoutes, graphBounds, type Coverage, type Point, type Routes } from "./api";
 
 const LINE = "geko-route";
 const ALTERNATIVES = 2;
@@ -15,6 +15,14 @@ const time = (s: number) => {
   const minutes = Math.round(s / 60);
   return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
 };
+
+/** How much of a route had traffic data, so that «no queues» is not read where there is only «no data». */
+function known(coverage?: Coverage) {
+  if (!coverage || coverage.free_flow >= 1) return "No traffic data on this route: its time is at free flow.";
+  const share = (n: number) => `${Math.round(n * 100)} %`;
+  const parts = [`${share(coverage.live)} live`, `${share(coverage.historical)} usual`, `${share(coverage.free_flow)} no data`];
+  return `Traffic: ${parts.join(", ")}.`;
+}
 
 /** The lines of `routes`, the one chosen last so that it is drawn on top. */
 function draw(map: MlMap, routes: Routes["routes"], chosen: number) {
@@ -178,6 +186,7 @@ export function RoutePanel({ map, on, onToggle }: Props) {
               ))}
             </ul>
           )}
+          {found && <p class="route-note">{known(found.routes[chosen]?.coverage)}</p>}
           {found && <p class="route-note">{number(found.compute_us)} µs on the server. Drag an end to move it.</p>}
           {ends.from && (
             <button class="link" onClick={() => setEnds(NONE)}>

@@ -92,7 +92,7 @@ export function Sidebar({
           {link("map", "Map", Earth)}
           {modules.length > 0 && <div class="eyebrow">Modules</div>}
           {modules.map((m) =>
-            link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable),
+            link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable ?? m.warning),
           )}
         </nav>
         <div class="foot">

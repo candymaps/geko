@@ -58,10 +58,19 @@ export function combine(list: Stats[]): Stats {
 /** `[lon, lat]`, as MapLibre and GeoJSON have it. */
 export type Point = [number, number];
 
+/** The share of a route known by live data, by what is usual, and by nothing but its road class. */
+export interface Coverage {
+  live: number;
+  historical: number;
+  free_flow: number;
+}
+
 export interface Route {
   duration_s: number;
   distance_m: number;
   geometry: { type: "LineString"; coordinates: Point[] };
+  /** Absent with traffic off. */
+  coverage?: Coverage;
 }
 
 export interface Routes {
@@ -82,5 +91,6 @@ export async function findRoutes(from: Point, to: Point, alternatives: number): 
   const res = await fetch(`/router/v1/route?${q}`);
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? res.statusText);
   const body = await res.json();
-  return { routes: [body, ...(body.alternatives ?? [])], compute_us: body.compute_us };
+  // The first route says it in `traffic`, beside the rest of the traffic; the alternatives, on their own.
+  return { routes: [{ ...body, coverage: body.traffic?.coverage }, ...(body.alternatives ?? [])], compute_us: body.compute_us };
 }

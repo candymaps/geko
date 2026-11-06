@@ -26,6 +26,8 @@ pub struct ModuleStatus {
     pub version: String,
     /// Why it answers nothing now, if so.
     pub unavailable: Option<String>,
+    /// What is wrong with a module that does answer, if anything.
+    pub warning: Option<String>,
 }
 
 /// The active modules as of now: read at each request, so it is always what the operator last saw.
@@ -57,7 +59,7 @@ pub fn router(access: Access, statuses: Statuses, pods: Pods) -> Router {
             "/admin/api/modules",
             get(move || {
                 let body: serde_json::Value =
-                    statuses().into_iter().map(|m| json!({ "name": m.name, "version": m.version, "unavailable": m.unavailable })).collect();
+                    statuses().into_iter().map(|m| json!({ "name": m.name, "version": m.version, "unavailable": m.unavailable, "warning": m.warning })).collect();
                 async move { Json(body) }
             }),
         )
@@ -110,8 +112,8 @@ mod tests {
     fn app(keys: &[&str]) -> Router {
         let statuses: Statuses = Arc::new(|| {
             vec![
-                ModuleStatus { name: "geocoder".into(), version: "1.2.0".into(), unavailable: None },
-                ModuleStatus { name: "tiles".into(), version: String::new(), unavailable: Some("no pod ready (0/1)".into()) },
+                ModuleStatus { name: "geocoder".into(), version: "1.2.0".into(), unavailable: None, warning: None },
+                ModuleStatus { name: "tiles".into(), version: String::new(), unavailable: Some("no pod ready (0/1)".into()), warning: None },
             ]
         });
         let pods: Pods = Arc::new(|module, path| {
@@ -141,8 +143,8 @@ mod tests {
         assert_eq!(
             body,
             json!([
-                { "name": "geocoder", "version": "1.2.0", "unavailable": null },
-                { "name": "tiles", "version": "", "unavailable": "no pod ready (0/1)" },
+                { "name": "geocoder", "version": "1.2.0", "unavailable": null, "warning": null },
+                { "name": "tiles", "version": "", "unavailable": "no pod ready (0/1)", "warning": null },
             ])
         );
     }
