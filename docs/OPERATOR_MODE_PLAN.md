@@ -162,7 +162,7 @@ configMapGenerator:
 ### Fallos
 
 24. **Cae el operador**: los módulos siguen sirviendo; solo se pausan los cambios y los builds.
-25. **Falla un build**: los pods siguen con el bundle anterior; el operador lo dice en sus métricas y en su estado.
+25. **Falla un build**: los pods siguen con el bundle anterior; el operador lo dice en sus métricas y en su estado, y el dashboard lo avisa en el módulo.
 26. **Cae un pod de un módulo**: lo reinicia Kubernetes, no el operador.
 
 ### Configuración solo del modo operador

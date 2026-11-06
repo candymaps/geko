@@ -1,5 +1,6 @@
 import type { ModuleInfo } from "../api";
 import type { RouteStats, Stats, Status } from "../geocoder/api";
+import type { Stats as RouterStats, Status as RouterStatus } from "../router/api";
 import type { RouteStats as TileRouteStats, Stats as TileStats, Status as TileStatus } from "../tiles/api";
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -7,6 +8,7 @@ const now = () => Math.floor(Date.now() / 1000);
 const modules: ModuleInfo[] = [
   { name: "geocoder", version: "0.1.0", unavailable: null },
   { name: "tiles", version: "0.1.0", unavailable: null },
+  { name: "router", version: "0.1.0", unavailable: null },
 ];
 
 const status = (): Status => ({
@@ -183,8 +185,62 @@ const tileStats = (): TileStats => ({
   },
 });
 
+const routerStatus = (): RouterStatus => ({
+  ready: true,
+  bundle: { version: "v2026-10-27T161913", created_unix: now() - 7200 },
+  profile: "car",
+  nodes: 3_912_405,
+  edges: 8_640_118,
+  turns: 14_880_236,
+  bounds: [27.64, -18.16, 43.79, 4.33],
+  traffic: null,
+  last_build: {
+    finished_unix: now() - 7200,
+    stages: [
+      { stage: "fetch", elapsed_ms: 62_000, peak_mb: 300, reused: false },
+      { stage: "fragment spain", elapsed_ms: 148_000, peak_mb: 2_900, reused: false },
+      { stage: "graph", elapsed_ms: 41_000, peak_mb: 3_600, reused: false },
+      { stage: "hierarchy", elapsed_ms: 310_000, peak_mb: 6_200, reused: false },
+    ],
+  },
+  sources: [{ id: "osm", name: "ODbL 1.0", attribution: "© OpenStreetMap contributors", url: "https://www.openstreetmap.org/copyright" }],
+  settings: [
+    { key: "osm.mirror", value: "auto", default: "auto", apply: "rebuild" },
+    { key: "packs.registry", value: "ghcr.io/candymaps/geko-router/countries", default: "ghcr.io/candymaps/geko-router/countries", apply: "rebuild" },
+    { key: "profiles.default", value: "car", default: "car", apply: "rebuild" },
+    { key: "traffic.enabled", value: false, default: false, apply: "rebuild" },
+    { key: "traffic.live", value: true, default: true, apply: "restart" },
+    { key: "sources", value: {}, default: {}, apply: "rebuild" },
+    { key: "serve.preload", value: true, default: true, apply: "restart" },
+  ],
+});
+
+const routerStats = (): RouterStats => ({
+  since_unix: now() - 5400,
+  routes: [
+    tileRoute("v1/route", 184_300, 1_240, 250, 500, 1_000),
+    tileRoute("v1/nearest", 52_700, 90, 50, 100, 250),
+    tileRoute("v1/table", 1_480, 12, 25_000, 100_000, 250_000),
+    tileRoute("v1/isochrone", 610, 3, 50_000, 100_000, 250_000),
+    tileRoute("v1/match", 340, 8, 5_000, 25_000, 50_000),
+    tileRoute("v1/trip", 95, 1, 10_000, 50_000, 100_000),
+  ],
+  last_hour: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(2_600 + Math.sin(i / 5) * 700 + Math.random() * 300)),
+    p99_us: Array.from({ length: 60 }, (_, i) => (i % 17 === 0 ? 2_500 : 1_000)),
+  },
+  last_minute: {
+    end_unix: now(),
+    requests: Array.from({ length: 60 }, (_, i) => Math.round(44 + Math.sin(i / 6) * 12 + Math.random() * 6)),
+    p99_us: Array.from({ length: 60 }, (_, i) => (i % 23 === 0 ? 2_500 : 1_000)),
+  },
+});
+
 const routes: Record<string, () => unknown> = {
   "/admin/api/modules": () => modules,
+  "/router/v1/status": routerStatus,
+  "/router/v1/stats": routerStats,
   "/geocoder/v1/status": status,
   "/geocoder/v1/stats": stats,
   "/tiles/status.json": tileStatus,

@@ -2,10 +2,11 @@ import {
   BookOpen,
   Box,
   Earth,
-  Layers,
+  Grid2x2,
   MapPinned,
   PanelLeftClose,
   PanelLeftOpen,
+  Road,
   type LucideIcon,
 } from "lucide-preact";
 import type { ModuleInfo } from "./api";
@@ -14,7 +15,8 @@ import { VERSION } from "./version";
 
 const ICONS: Record<string, LucideIcon> = {
   geocoder: MapPinned,
-  tiles: Layers,
+  tiles: Grid2x2,
+  router: Road,
 };
 
 const modifier = /Mac/i.test(navigator.userAgent) ? "⌘" : "Ctrl";
@@ -90,7 +92,7 @@ export function Sidebar({
           {link("map", "Map", Earth)}
           {modules.length > 0 && <div class="eyebrow">Modules</div>}
           {modules.map((m) =>
-            link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable),
+            link(m.name, capitalize(m.name), iconOf(m.name), m.unavailable ?? m.warning),
           )}
         </nav>
         <div class="foot">

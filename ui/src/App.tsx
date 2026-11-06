@@ -3,6 +3,7 @@ import type { ComponentType } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { useApi, type ModuleInfo } from "./api";
 import { GeocoderPage } from "./geocoder/GeocoderPage";
+import { RouterPage } from "./router/RouterPage";
 import { TilesPage } from "./tiles/TilesPage";
 import { useMedia, useRoute, useStored } from "./hooks";
 import { useSource } from "./source";
@@ -38,6 +39,7 @@ export function App() {
   // The map talks to geko itself: it has no sample data.
   const geocoder = (modules?.some((m) => m.name === "geocoder") ?? false) && mode === "live";
   const tiles = (modules?.some((m) => m.name === "tiles" && !m.unavailable) ?? false) && mode === "live";
+  const router = (modules?.some((m) => m.name === "router" && !m.unavailable) ?? false) && mode === "live";
 
   const open = small ? true : large ? wide : peek;
   const toggle = () => (large ? setWide(!wide) : setPeek(!peek));
@@ -77,12 +79,13 @@ export function App() {
             {!offline && error && <p class="error">{error}</p>}
             {MapPage && (
               <div class="page" hidden={!onMap}>
-                <MapPage key={mode} geocoder={geocoder} tiles={tiles} active={onMap} />
+                <MapPage key={mode} geocoder={geocoder} tiles={tiles} router={router} active={onMap} />
               </div>
             )}
             {!onMap && current === "geocoder" && <GeocoderPage version={module?.version} />}
             {!onMap && current === "tiles" && <TilesPage version={module?.version} />}
-            {!onMap && current !== "geocoder" && current !== "tiles" && <div class="empty">Nothing here yet.</div>}
+            {!onMap && current === "router" && <RouterPage version={module?.version} />}
+            {!onMap && current !== "geocoder" && current !== "tiles" && current !== "router" && <div class="empty">Nothing here yet.</div>}
           </div>
         </main>
       </div>
