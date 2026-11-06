@@ -33,9 +33,9 @@ La prueba de humo reutiliza las descargas de la última ejecución buena, en mod
 
 ## Fase 2: módulos independientes
 
-- [ ] 2.1. Geocoder: validar el formato de sus datos en `load`.
-- [ ] 2.2. Router: lo mismo.
-- [ ] 2.3. ⏸ Publicar geocoder y router, y actualizar `modules.lock`.
+- [x] 2.1. Geocoder: validar el formato de sus datos en `load`. No hace falta cambiar nada: `geocode-fst` y `reverse-rstar` ya rechazan otro formato al abrirse, y `load` no cambia lo servido hasta abrir todos los segmentos. Esa rama no tiene prueba propia.
+- [ ] 2.2. Router: lo mismo. Con `preload = true` ya lo hacía; con `preload = false` no miraba el fichero hasta la primera petición. Arreglo probado en una copia, a falta de aplicarlo en su repositorio: `/var/lib/geko/patches/router-reject-at-load.patch`.
+- [ ] 2.3. ⏸ Publicar el router, y actualizar `modules.lock`. El geocoder no cambia, así que no hace falta publicarlo.
 - [x] 2.4. Host: dejar de comparar versiones al cargar un bundle.
 - [x] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
 - [x] 2.6. Host: `/health`, `/ready` y atribución por módulo.
