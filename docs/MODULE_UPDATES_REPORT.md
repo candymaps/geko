@@ -169,7 +169,7 @@ Con geocoder, router y tiles activos, eso son módulos sirviendo bundles distint
 
 **P8. `geko plan` no es inocuo.** Baja y carga el módulo antes de mostrar nada, aunque `PROJECT.md` dice «sin hacer nada». Lo mismo vale para `geko purge modules`, que baja el último antes de limpiar.
 
-**P9. Las claves de etapa no dependen de la versión del módulo.** Tiles y router usan constantes por etapa (`SCOPE_CODE`, `GRAPH_CODE`…) y el geocoder un `code` por fuente. Reutilizar etapas es bueno para reconstruir rápido, pero depende de que alguien suba a mano la constante. Si se olvida, el módulo nuevo publica datos generados por código antiguo con su propia versión en el manifiesto. No he auditado si eso ha pasado.
+**P9. En tiles y router, repetir una etapa depende de subir una constante a mano.** Usan una constante por etapa (`SCOPE_CODE`, `GRAPH_CODE`…) dentro de la clave incremental. Si cambia el código de una etapa y nadie sube su constante, la etapa se salta, y el módulo nuevo publica datos generados por código antiguo con su propia versión en el manifiesto. El geocoder no tiene este problema: `module/build.rs` calcula un hash del código de cada crate al compilar (`GEKO_CODE_<CRATE>`). No he auditado si el fallo ha llegado a ocurrir; las siete constantes de tiles siguen en `"1"`.
 
 **P10. Falta el «host mínimo».** Lo describe el plan y no existe (sección 4).
 
@@ -204,7 +204,7 @@ No es un problema hoy `MAX_BLOB` (256 MiB, y lo más grande son 18,2 MiB), aunqu
 | Se comprueba el host mínimo | `MODULES_PLAN.md` | No existe |
 | El error lista las versiones compatibles | `MODULES_PLAN.md` | Solo propone quitar `version` |
 | Con el registro inalcanzable, la copia en disco | `MODULES_PLAN.md` | Solo si falla el manifiesto (P4) |
-| La versión del módulo va en los sellos de las etapas | `MODULES_PLAN.md`, paso 3 | Constantes manuales (P9) |
+| La versión del módulo va en los sellos de las etapas | `MODULES_PLAN.md`, paso 3 | Hash del código en el geocoder, constantes manuales en tiles y router (P9) |
 | `geko plan` no hace nada | `PROJECT.md:71` | Baja y carga los módulos (P8) |
 | geko se mantiene actualizado sin reiniciar | `AGENTS.md` de `geko-context` | Cierto para datos, no para módulos |
 
@@ -264,6 +264,7 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
    - **El host deja de comparar versiones.** Cada módulo valida en `load` que sabe leer sus datos, como ya hace tiles con `tileset::FORMAT`; hay que revisar el geocoder y el router. Es asunto del módulo: el host y la SDK no conocen ningún formato. Si el módulo puede leerlo, sirve el bundle al momento y se reconstruye en segundo plano.
    - **Carga independiente por módulo.** Cada módulo tiene su estado (bundle cargado y último error) y carga cuando puede: si uno falla, los demás sirven el bundle nuevo, y el que falla sigue con el anterior o da 503 solo en sus rutas. Un bundle rechazado no se reintenta en ese módulo hasta que haya otro.
    - **`/health`, `/ready` y la atribución, por módulo.**
+   - **`[build] keep = 2` por defecto,** para poder volver al bundle anterior tras actualizar el host, a costa de disco.
    - **Build independiente, en un PR aparte.** Si un módulo devuelve un error, se sigue con los demás y se publica lo que haya salido bien, conservando la parte anterior del que falló (como `keep_others`, sin comprobar aún que sirva tal cual). El build termina con error, para que el fallo no pase desapercibido. Un fallo grave, como un segfault, sigue tirando el proceso. No tiene que ver con las actualizaciones, y el resto del plan no depende de él.
 3. **Módulos en la imagen.** Una sola imagen, también para el operador (`--image`), y fuera las imágenes por módulo. Los módulos no se compilan en el host: siguen siendo `.so` separadas, compiladas en su repositorio y cargadas al arrancar. En Kubernetes sigue habiendo un pod por módulo (`--module`). Como consecuencia, cada versión del host reinicia los pods de todos los módulos, aunque solo cambie uno.
 4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check`. La SDK estrena versión propia, y los módulos pasan a `tag = "sdk-v<versión>"`.
@@ -278,13 +279,14 @@ Se pierde que un arreglo de un módulo llegue sin release del host, y que se pue
 | P4 | Desaparece para módulos. El host no los descarga |
 | P11 | Sustituido por la prueba de la fase 1 |
 | P2, P7 | Se arreglan en la fase 2 |
-| P9 | Sigue abierto: decidir entre invalidar etapas por versión o comprobar las constantes en la CI |
+| P9 | Sigue abierto: propuesta, usar en tiles y router el hash de código del geocoder. Es independiente de este plan |
 | P14 | Sigue para los packs de país, que se bajan de forma anónima |
 
 ### Pendiente de decidir
 
-- **`[build] keep`:** con `1` no se puede volver al bundle anterior tras actualizar el host; con `2` sí, a costa de disco.
-- **Automatización del fichero de versiones:** qué dispara el PR y si la release del host es automática o la lanza alguien.
+- **Automatización del fichero de versiones:** qué dispara el PR, y si se fusiona solo en `dev` al pasar las pruebas. El fichero no puede ir en `ci/`: `protected.yml` solo deja al propietario cambiar esa carpeta, y un PR automático fallaría.
+- **Publicación del host:** hoy `ci.yml` corre en cada PR y `publish.yml` en cada push a `main`. Propuesta: la prueba de la combinación corre en los PR que puedan afectarla y antes de publicar, y publicar sigue siendo fusionar a mano el PR de `dev` a `main`.
+- **Hash de código en tiles y router** (P9).
 - **Enlazar los módulos en un solo binario:** queda fuera de este plan. Quitaría `wire`, `Remote` y `dylib`, pero exige medir y revisar la regla de que el host no depende de ningún módulo.
 
 ### Deseable, sin planificar
