@@ -43,7 +43,7 @@ accept_licenses    = false          # required to download: review the licenses 
 parallel_downloads = 4              # downloads at the same time
 
 [build]
-keep = 1                            # published versions kept (2 to be able to roll back)
+keep = 2                            # published versions kept (2 to be able to roll back)
 
 [serve]
 listen                 = "127.0.0.1:8080"   # in Docker, always 0.0.0.0:8080
@@ -95,7 +95,7 @@ build with no `--module` publishes exactly the modules that are active.
 Two probes tell a process apart:
 
 - `/health` answers from the start: the process is alive, also while it builds.
-- `/ready` answers 503 until a bundle is loaded with the part of every module served there, and 200
-  from then on.
+- `/ready` answers 503 until every module served there has loaded its part of a bundle, and 200 from
+  then on. `/ready?module=geocoder` asks about one alone.
 
 They are the liveness and readiness probes of a pod. Neither needs an API key.
