@@ -46,6 +46,10 @@ jobs:
         with:
           repository: candymaps/geko-tiles
           path: modules/geko-tiles
+      - uses: actions/checkout@v4
+        with:
+          repository: candymaps/geko-router
+          path: modules/geko-router
       # kind and kubectl are on the image of the runner.
       - run: kind version && kubectl version --client
       - env:

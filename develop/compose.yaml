@@ -6,8 +6,8 @@
 # The image (target `local` of the Dockerfile) carries geko and the modules of GEKO_DEV_MODULES,
 # built inside Docker on the Debian of the published image from their repositories, beside this one
 # (geko-<module>), against the SDK of this tree, and never downloads a module: one active in the
-# configuration but not built in is an error. The country packs are those of the repository of the
-# geocoder, never downloaded either. Everything is grouped under the project geko-dev.
+# configuration but not built in is an error. The country packs are those of the repositories of the
+# geocoder and the router, never downloaded either. Everything is grouped under the project geko-dev.
 #
 #   GEKO_DEV_CONFIG    the geko.toml (default: develop/geko.toml, the sample of the image, which
 #                      does not accept the licences: use your own, outside the repository)
@@ -28,6 +28,7 @@ services:
       additional_contexts:
         geocoder: ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder
         tiles: ${GEKO_DEV_MODULES_DIR:-../..}/geko-tiles
+        router: ${GEKO_DEV_MODULES_DIR:-../..}/geko-router
         tiles-profile: ${GEKO_DEV_TILES_PROFILE:-.}
       args:
         MODULES: ${GEKO_DEV_MODULES:-geocoder}
@@ -39,8 +40,10 @@ services:
       - data:/var/lib/geko
       - ${GEKO_DEV_CONFIG:-./geko.toml}:/etc/geko/geko.toml:ro
       - ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder/countries:/packs:ro
+      - ${GEKO_DEV_MODULES_DIR:-../..}/geko-router/countries:/router-packs:ro
     environment:
       GEKO_PACKS: /packs
+      GEKO_ROUTER_PACKS: /router-packs
 
 volumes:
   data:

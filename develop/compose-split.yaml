@@ -15,6 +15,8 @@
 #
 #   GEKO_DEV_CONFIG=~/geko-dev.toml docker compose -f develop/compose-split.yaml up --build
 #
+#   --profile router  also the build and the server of the router, which is off by default: with
+#                     router = true in the configuration and GEKO_DEV_MODULES=geocoder,tiles,router
 #   GEKO_SPLIT_DATA   the volume with the bundles and the downloads (default: geko-split_data, which
 #                     starts empty; geko-dev_data, that of compose.yaml, reuses its downloads)
 name: geko-split
@@ -26,6 +28,7 @@ x-geko: &geko
     additional_contexts:
       geocoder: ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder
       tiles: ${GEKO_DEV_MODULES_DIR:-../..}/geko-tiles
+      router: ${GEKO_DEV_MODULES_DIR:-../..}/geko-router
       tiles-profile: ${GEKO_DEV_TILES_PROFILE:-.}
     args:
       MODULES: ${GEKO_DEV_MODULES:-geocoder,tiles}
@@ -35,8 +38,10 @@ x-geko: &geko
     - data:/var/lib/geko
     - ${GEKO_DEV_CONFIG:-./geko.toml}:/etc/geko/geko.toml:ro
     - ${GEKO_DEV_MODULES_DIR:-../..}/geko-geocoder/countries:/packs:ro
+    - ${GEKO_DEV_MODULES_DIR:-../..}/geko-router/countries:/router-packs:ro
   environment:
     GEKO_PACKS: /packs
+    GEKO_ROUTER_PACKS: /router-packs
 
 x-server: &server
   <<: *geko
@@ -62,6 +67,15 @@ services:
       build-geocoder:
         condition: service_completed_successfully
 
+  build-router:
+    <<: *geko
+    command: ["build", "--module", "router"]
+    restart: "no"
+    profiles: [router]
+    depends_on:
+      build-tiles:
+        condition: service_completed_successfully
+
   geocoder:
     <<: *server
     command: ["serve", "--module", "geocoder", "--listen", "0.0.0.0:8080"]
@@ -69,6 +83,11 @@ services:
   tiles:
     <<: *server
     command: ["serve", "--module", "tiles", "--listen", "0.0.0.0:8080"]
+
+  router:
+    <<: *server
+    command: ["serve", "--module", "router", "--listen", "0.0.0.0:8080"]
+    profiles: [router]
 
   ingress:
     image: nginx:1.27-alpine

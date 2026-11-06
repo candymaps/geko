@@ -15,7 +15,7 @@
 # machine published.
 #
 # The target `local` (develop/compose.yaml, `make start-dev`) is for development instead: geko and the
-# modules of MODULES, built from their repositories (the build contexts `geocoder` and `tiles`)
+# modules of MODULES, built from their repositories (the build contexts `geocoder`, `tiles` and `router`)
 # against the SDK of this tree, in the image, so that it never downloads one.
 
 # The dashboard (ui/), which geko embeds: compiled here, in the Node of its package-lock.json.
@@ -43,6 +43,7 @@ COPY --from=build /out/geko /geko
 # empty without them.
 FROM scratch AS geocoder
 FROM scratch AS tiles
+FROM scratch AS router
 # The Planetiler profile of the tiles module (protomaps-basemap.jar and styles/, from its ci/profile.sh),
 # given as the build context tiles-profile by `make start-dev`; empty without it.
 FROM scratch AS tiles-profile
@@ -66,6 +67,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=geko-target-local,target=/src/target \
     --mount=type=bind,from=geocoder,target=/modules/geocoder \
     --mount=type=bind,from=tiles,target=/modules/tiles \
+    --mount=type=bind,from=router,target=/modules/router \
     --mount=type=bind,from=tiles-profile,target=/profile/tiles \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
