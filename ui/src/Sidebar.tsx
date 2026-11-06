@@ -6,7 +6,7 @@ import {
   MapPinned,
   PanelLeftClose,
   PanelLeftOpen,
-  Route,
+  Road,
   type LucideIcon,
 } from "lucide-preact";
 import type { ModuleInfo } from "./api";
@@ -16,7 +16,7 @@ import { VERSION } from "./version";
 const ICONS: Record<string, LucideIcon> = {
   geocoder: MapPinned,
   tiles: Grid2x2,
-  router: Route,
+  router: Road,
 };
 
 const modifier = /Mac/i.test(navigator.userAgent) ? "⌘" : "Ctrl";
