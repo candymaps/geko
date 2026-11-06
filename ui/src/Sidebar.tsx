@@ -2,7 +2,7 @@ import {
   BookOpen,
   Box,
   Earth,
-  Layers,
+  Grid2x2,
   MapPinned,
   PanelLeftClose,
   PanelLeftOpen,
@@ -15,7 +15,7 @@ import { VERSION } from "./version";
 
 const ICONS: Record<string, LucideIcon> = {
   geocoder: MapPinned,
-  tiles: Layers,
+  tiles: Grid2x2,
   router: Route,
 };
 
