@@ -35,7 +35,8 @@ The search of the geocoder (autocomplete, search, reverse geocoding, focus pin) 
 With the `router` module active and its graph loaded, **Directions** turns the clicks of the map into a
 route: the first click is the start, the next the end, and another starts over. It draws the fastest
 route and up to two alternatives, says the time and the length of each, and both ends can be dragged.
-While it is on, a click does not reverse geocode.
+While it is on, a click does not reverse geocode. Turned on with the roads of the scope out of sight, the
+map goes to them.
 
 ## The tab of a module
 

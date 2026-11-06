@@ -2,7 +2,7 @@ import { Route as RouteIcon } from "lucide-preact";
 import maplibregl, { type GeoJSONSource, type Map as MlMap, type MapMouseEvent, type Marker } from "maplibre-gl";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { number } from "../panel";
-import { findRoutes, type Point, type Routes } from "./api";
+import { findRoutes, graphBounds, type Point, type Routes } from "./api";
 
 const LINE = "geko-route";
 const ALTERNATIVES = 2;
@@ -74,6 +74,23 @@ export function RoutePanel({ map, on, onToggle }: Props) {
     return () => {
       canvas.style.cursor = "";
       map.off("click", click);
+    };
+  }, [map, on]);
+
+  // The map opens anywhere and a route needs the roads of the scope: if they are out of sight, go there.
+  useEffect(() => {
+    if (!on) return;
+    let gone = false;
+    graphBounds().then(
+      (b) => {
+        if (gone || !b) return;
+        const box = new maplibregl.LngLatBounds([b[1], b[0]], [b[3], b[2]]);
+        if (!box.contains(map.getCenter())) map.fitBounds(box, { padding: 40 });
+      },
+      () => {},
+    );
+    return () => {
+      gone = true;
     };
   }, [map, on]);
 

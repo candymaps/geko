@@ -70,6 +70,12 @@ export interface Routes {
   compute_us: number;
 }
 
+/** `[min lat, min lon, max lat, max lon]` of the graph, null without one. */
+export async function graphBounds(): Promise<Status["bounds"]> {
+  const res = await fetch("/router/v1/status");
+  return res.ok ? (await res.json()).bounds : null;
+}
+
 /** The fastest route and up to `alternatives` others; the error is what the module says of it. */
 export async function findRoutes(from: Point, to: Point, alternatives: number): Promise<Routes> {
   const q = new URLSearchParams({ from: `${from[1]},${from[0]}`, to: `${to[1]},${to[0]}`, alternatives: String(alternatives) });
