@@ -1,0 +1,8 @@
+# The modules of this geko: the exact package of each one, as ci/modules.sh pulls and checks it.
+# It is outside ci/ because protected.yml keeps that folder for the owner, and the pull request of
+# modules-update.yml changes this file.
+#
+# <module> <version> <platform> <digest of its manifest>
+geocoder 0.3.0 linux-x86_64 sha256:760ce3efa60f9fe7ecd2c22844e45e9c061bdf08640b1749f190421f355cfc62
+tiles 0.3.0 linux-x86_64 sha256:44464b75fd8e67f0203d9f9546370def8bc9f9676f2cf1e5316a804cd852442e
+router 0.1.0 linux-x86_64 sha256:3b1435d6330482a354d406b4eadc9ed136217b6ea1230bcb9cb54a3d0024d3c2

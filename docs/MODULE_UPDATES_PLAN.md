@@ -1,6 +1,6 @@
 # Plan de actualización de módulos
 
-Estado: sin empezar (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
+Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
 
 **Objetivo:** solo se elige la versión del host, y ella decide exactamente qué módulos lleva. La compatibilidad de código se comprueba al publicar, y cada módulo funciona de forma independiente.
 
@@ -8,14 +8,28 @@ Estado: sin empezar (2026-11-06). Rama: `feature/module-updates`. El análisis y
 
 ## Fase 1: comprobar la combinación (host)
 
-- [ ] 1.1. Crear `modules.lock` en la raíz, con versión y digest de geocoder `0.3.0`, tiles `0.3.0` y router `0.1.0`.
-- [ ] 1.2. Crear `ci/modules.sh pull <carpeta>`, que baja cada paquete por digest y verifica firma y versión.
-- [ ] 1.3. Crear la prueba que carga cada `.so` real y pasa la suite de conformidad.
-- [ ] 1.4. Crear la prueba de humo: build y `serve` de Luxemburgo con los tres módulos.
-- [ ] 1.5. Crear el workflow `modules.yml`, para los PR que cambien `modules.lock` o la SDK.
-- [ ] 1.6. Hacer que `publish.yml` exija ese mismo trabajo.
-- [ ] 1.7. Crear un workflow programado que compare el registro con `modules.lock` y abra el PR a `dev`.
-- [ ] 1.8. Medir cuánto tarda.
+- [x] 1.1. Crear `modules.lock` en la raíz, con versión y digest de geocoder `0.3.0`, tiles `0.3.0` y router `0.1.0`.
+- [x] 1.2. Crear `ci/modules.sh pull <carpeta>`, que baja cada paquete por digest y verifica firma y versión.
+- [x] 1.3. Crear la prueba que carga cada `.so` real y pasa la suite de conformidad.
+- [x] 1.4. Crear la prueba de humo: build y `serve` de Luxemburgo con los tres módulos.
+- [x] 1.5. Crear el workflow `modules.yml`, para los PR que cambien `modules.lock` o la SDK.
+- [x] 1.6. Hacer que `publish.yml` exija ese mismo trabajo.
+- [ ] 1.7. Crear un workflow programado que compare el registro con `modules.lock` y abra el PR a `dev`. Escrito (`modules-update.yml`); falta el secreto `GEKO_MODULES_PR_TOKEN`, y sin él avisa y no hace nada.
+- [x] 1.8. Medir cuánto tarda.
+
+Medido el 2026-11-06, en WSL, sin compilar geko desde cero:
+
+| Parte | Tiempo |
+| --- | --- |
+| `pull` | 19 s |
+| `conformance` | 5 s |
+| `smoke`, con las descargas ya hechas | 92 s, de ellos 56 s de Planetiler |
+
+Sin medir: la primera ejecución con todas las descargas (los polígonos de `osmdata` son 1,8 GB), porque `osmdata.openstreetmap.de` estaba caído. La prueba de humo se ejecutó con los polígonos del golden de Baleares, de modo que Luxemburgo salió sin agua ni tierra. Tampoco han corrido los workflows en GitHub: solo los ha validado `actionlint`.
+
+Comprobado que falla cuando debe: con una `.so` manipulada, un digest falso y una versión que no coincide.
+
+La prueba de humo reutiliza las descargas de la última ejecución buena, en modo `offline`, porque `geko` consulta las fuentes aunque tenga la copia: sin eso, una fuente caída bloquearía una release.
 
 ## Fase 2: módulos independientes
 

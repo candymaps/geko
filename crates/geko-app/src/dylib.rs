@@ -167,4 +167,26 @@ mod tests {
         let err = load(Path::new("/nonexistent/libgeko_none.so"), context()).err().unwrap();
         assert!(err.to_string().contains("cannot load the module"), "{err}");
     }
+
+    /// Each package of the folder `GEKO_CHECK_PACKAGES`, as `ci/modules.sh conformance` leaves them:
+    /// the real libraries of modules.lock through the adapter of this geko.
+    #[test]
+    #[ignore = "needs the packages: ci/modules.sh conformance"]
+    fn real_packages_keep_the_contract() {
+        let root = std::env::var_os("GEKO_CHECK_PACKAGES").expect("GEKO_CHECK_PACKAGES");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(root).unwrap() {
+            let dir = entry.unwrap().path();
+            if !dir.join("module.toml").is_file() {
+                continue;
+            }
+            let package = crate::store::Package::read(&dir).unwrap();
+            let data = tempfile::tempdir().unwrap();
+            let module = load(&dir.join(&package.entry), Context { data_dir: data.path().to_path_buf(), ..context() }).unwrap();
+            geko_module_sdk::conformance::module::check(&module);
+            println!("conformance passed: {}", dir.display());
+            checked += 1;
+        }
+        assert!(checked > 0, "no package in GEKO_CHECK_PACKAGES");
+    }
 }

@@ -1,6 +1,7 @@
 # The publication of what reaches main: on every push to it, the image, with the version of
-# Cargo.toml, and the tag of the SDK. The checks are not run again: main only takes pull requests
-# that passed them (ci.yml), up to date with it (the protection of the branch).
+# Cargo.toml, and the tag of the SDK. The checks of ci.yml are not run again: main only takes pull
+# requests that passed them, up to date with it (the protection of the branch). Those of modules.yml
+# are: nothing is published until this geko has run with the modules of modules.lock.
 name: publish
 
 on:
@@ -16,6 +17,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  modules:
+    if: github.repository == 'candymaps/geko'
+    uses: ./.github/workflows/modules.yml
+
   # Publishes in ghcr.io, with the version of Cargo.toml:
   # - if the push changed what goes into it (not only documentation), the image
   #   (ghcr.io/candymaps/geko, tag <version>-<commit>), which carries no module: it downloads those
@@ -29,6 +34,7 @@ jobs:
   #   must be raised.
   # GitHub's own token pushes. Not in a fork.
   publish:
+    needs: modules
     if: github.repository == 'candymaps/geko'
     runs-on: ubuntu-latest
     permissions:
