@@ -18,8 +18,8 @@ const time = (s: number) => {
 
 /** The lines of `routes`, the one chosen last so that it is drawn on top. */
 function draw(map: MlMap, routes: Routes["routes"], chosen: number) {
-  const data: GeoJSON.FeatureCollection = {
-    type: "FeatureCollection",
+  const data = {
+    type: "FeatureCollection" as const,
     features: routes
       .map((r, i) => ({ type: "Feature" as const, properties: { chosen: i === chosen }, geometry: r.geometry }))
       .sort((a, b) => Number(a.properties.chosen) - Number(b.properties.chosen)),
