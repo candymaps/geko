@@ -7,8 +7,8 @@ use std::ffi::c_void;
 use std::mem::MaybeUninit;
 use std::path::Path;
 
-use geko_module_sdk::dylib::{self, Buffer, CallFn, CloseFn, FreeFn, HelloFn, OpenFn};
-use geko_module_sdk::module::{CONTRACT, Context, Description};
+use geko_module_sdk::dylib::{self, Buffer, CallFn, CloseFn, FreeFn, OpenFn};
+use geko_module_sdk::module::{Context, Description};
 use geko_module_sdk::wire::{Call, Reply, frame, read_frame};
 use geko_module_sdk::{GekoError, Result};
 
@@ -17,7 +17,6 @@ use crate::remote::{Answer, Channel, Remote, decode};
 /// The functions a module library exports.
 #[derive(Clone, Copy)]
 pub struct Functions {
-    pub hello: HelloFn,
     pub open: OpenFn,
     pub call: CallFn,
     pub free: FreeFn,
@@ -55,11 +54,10 @@ impl Functions {
 pub fn load(path: &Path, context: Context) -> Result<DylibModule> {
     let failed = |e: libloading::Error| GekoError::Other(format!("cannot load the module {}: {e}", path.display()).into());
     // Safety: loading runs no code of the module beyond what a Rust library runs on load; its
-    // functions are those of `export_module!`, checked by name, and with the contract right after.
+    // functions are those of `export_module!`, checked by name.
     let library = unsafe { libloading::Library::new(path) }.map_err(failed)?;
     let functions = unsafe {
         Functions {
-            hello: *library.get::<HelloFn>(dylib::HELLO).map_err(failed)?,
             open: *library.get::<OpenFn>(dylib::OPEN).map_err(failed)?,
             call: *library.get::<CallFn>(dylib::CALL).map_err(failed)?,
             free: *library.get::<FreeFn>(dylib::FREE).map_err(failed)?,
@@ -71,15 +69,8 @@ pub fn load(path: &Path, context: Context) -> Result<DylibModule> {
     open(functions, context)
 }
 
-/// Greets the module through `functions`, checks its contract and opens it with `context`.
+/// Opens the module of `functions` with `context`.
 pub fn open(functions: Functions, context: Context) -> Result<DylibModule> {
-    let mut out = MaybeUninit::uninit();
-    unsafe { (functions.hello)(out.as_mut_ptr()) };
-    match functions.take(out)?.0 {
-        Reply::Hello { contract } if contract == CONTRACT => {}
-        Reply::Hello { contract } => return Err(GekoError::Incompatible(format!("the module implements contract {contract}, and this geko speaks contract {CONTRACT}"))),
-        _ => return Err(GekoError::Data("the module did not greet the host".into())),
-    }
     let input = frame(0, &Call::Open(context), &[]).map_err(io)?;
     let mut out = MaybeUninit::uninit();
     let module = unsafe { (functions.open)(input.as_ptr(), input.len(), out.as_mut_ptr()) };
@@ -99,7 +90,6 @@ impl Channel for Dylib {
         match self.functions.take(out)? {
             (Reply::Ok(value), payload) => Ok((value, payload)),
             (Reply::Err(e), _) => Err(e.into()),
-            (Reply::Hello { .. }, _) => Err(GekoError::Data("the module greeted the host again".into())),
         }
     }
 }
@@ -133,7 +123,7 @@ mod tests {
 
     /// The functions of the library, as the host finds them in it, but linked into the test.
     fn functions() -> Functions {
-        Functions { hello: fake::geko_module_hello, open: fake::geko_module_open, call: fake::geko_module_call, free: fake::geko_module_free, close: fake::geko_module_close }
+        Functions { open: fake::geko_module_open, call: fake::geko_module_call, free: fake::geko_module_free, close: fake::geko_module_close }
     }
 
     #[test]
@@ -180,7 +170,7 @@ mod tests {
             if !dir.join("module.toml").is_file() {
                 continue;
             }
-            let package = crate::store::Package::read(&dir).unwrap();
+            let package = crate::modules::Package::read(&dir).unwrap();
             let data = tempfile::tempdir().unwrap();
             let module = load(&dir.join(&package.entry), Context { data_dir: data.path().to_path_buf(), ..context() }).unwrap();
             geko_module_sdk::conformance::module::check(&module);

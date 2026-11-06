@@ -4,8 +4,7 @@
 //!
 //! A frame is the length of its header and that of its payload (`u32`, little-endian), the header
 //! as JSON and the payload as raw bytes: the bodies of requests and responses, which JSON would
-//! inflate. The first message is the module's greeting with its contract, so that a host that does
-//! not speak it refuses the module before asking it anything; the first call opens it.
+//! inflate. The first call opens the module.
 
 use std::io::{self, Read};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -38,7 +37,6 @@ pub enum Call {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Reply {
-    Hello { contract: u32 },
     /// What the method returned; the body of a `Response`, as the payload.
     Ok(serde_json::Value),
     Err(WireError),

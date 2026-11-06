@@ -16,10 +16,6 @@ use crate::scope::Scope;
 use crate::stages::StageRecord;
 use crate::{GekoError, Result};
 
-/// The version of this contract. A host lists the contracts it can speak; a module says which one
-/// it implements, and is refused by a host that does not speak it.
-pub const CONTRACT: u32 = 1;
-
 /// The version a module says it is (`Description::version`): that of its crate, or
 /// `GEKO_MODULE_VERSION` when it is compiled to be published (`ci/modules.sh`: `<version>-<commit>`,
 /// or `<version>` in a release), the version of its package in the registry.
@@ -114,7 +110,6 @@ pub struct CommandInfo {
 pub struct Description {
     pub name: ModuleName,
     pub version: String,
-    pub contract: u32,
     pub routes: Vec<Route>,
     /// The route (of `routes`) of the reference of its API, which `/docs` lists.
     pub openapi: Option<String>,

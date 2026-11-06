@@ -14,7 +14,6 @@ name = "geko"
 path = "src/main.rs"
 
 [dependencies]
-geko-artifact.workspace = true
 geko-module-sdk.workspace = true
 geko-server.workspace = true
 geko-fetch.workspace = true

@@ -77,10 +77,6 @@ pub struct ModuleTable {
     pub enabled: bool,
     /// Its file of configuration, relative to `geko.toml`; `geko-<module>.toml` beside it by default.
     pub config: Option<PathBuf>,
-    /// The version to download and build with, instead of the newest of the contract of this geko.
-    pub version: Option<String>,
-    /// Where it is downloaded from; `ghcr.io/candymaps/geko-<module>` by default.
-    pub registry: Option<String>,
 }
 
 fn yes() -> bool {
@@ -102,12 +98,6 @@ impl ModuleEntry {
         }
     }
 
-    fn table(&self) -> Option<&ModuleTable> {
-        match self {
-            ModuleEntry::Enabled(_) => None,
-            ModuleEntry::Table(t) => Some(t),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -265,6 +255,15 @@ impl Config {
                 return Err(GekoError::Config(format!("{what} is an option of the geocoder now: move it to geko-geocoder.toml, beside geko.toml")));
             }
         }
+        if let Some(modules) = table.get("modules").and_then(toml::Value::as_table) {
+            for (name, entry) in modules {
+                if let Some(key) = ["version", "registry"].into_iter().find(|key| entry.get(key).is_some()) {
+                    return Err(GekoError::Config(format!(
+                        "[modules.{name}] {key}: geko no longer downloads its modules, each version of it carries those of its modules.lock: remove it"
+                    )));
+                }
+            }
+        }
         let config: Config = toml::Value::Table(table).try_into().map_err(|e: toml::de::Error| GekoError::Config(e.to_string()))?;
         if config.data.parallel_downloads == 0 {
             return Err(GekoError::Config("data.parallel_downloads must be at least 1".into()));
@@ -315,16 +314,6 @@ impl Config {
         }
     }
 
-    /// `[modules.<module>] version`.
-    pub fn module_version(&self, module: &ModuleName) -> Option<&str> {
-        self.modules.get(module.as_str()).and_then(ModuleEntry::table).and_then(|t| t.version.as_deref())
-    }
-
-    /// `[modules.<module>] registry`.
-    pub fn module_registry(&self, module: &ModuleName) -> Option<&str> {
-        self.modules.get(module.as_str()).and_then(ModuleEntry::table).and_then(|t| t.registry.as_deref())
-    }
-
     /// Where bundles are published and served from.
     pub fn bundles_dir(&self) -> PathBuf {
         self.data.dir.join("bundles")
@@ -366,9 +355,10 @@ mod tests {
         assert_eq!(c.module_config(&geocoder, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/exact.toml"));
         let tiles = ModuleName::new("tiles").unwrap();
         assert_eq!(c.module_config(&tiles, Path::new("/etc/geko/geko.toml")), Path::new("/etc/geko/geko-tiles.toml"));
-        assert_eq!((c.module_version(&geocoder), c.module_registry(&geocoder)), (None, None));
-        let c = Config::parse("[modules.geocoder]\nversion = \"1.4.2\"\nregistry = \"ghcr.io/me/geko-geocoder\"\n").unwrap();
-        assert_eq!((c.module_version(&geocoder), c.module_registry(&geocoder)), (Some("1.4.2"), Some("ghcr.io/me/geko-geocoder")));
+        for key in ["version", "registry"] {
+            let err = Config::parse(&format!("[modules.geocoder]\n{key} = \"1.4.2\"\n")).unwrap_err().to_string();
+            assert!(err.contains(&format!("[modules.geocoder] {key}")) && err.contains("modules.lock"), "{err}");
+        }
         assert!(Config::parse("[modules.geocoder]\nconfg = \"x\"\n").is_err());
         assert!(Config::parse("[modules]\nGeocoder = true\n").is_err());
     }

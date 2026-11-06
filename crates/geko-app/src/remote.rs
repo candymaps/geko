@@ -119,7 +119,7 @@ pub mod tests {
 
     use super::*;
     use geko_module_sdk::bundle::{BundleManifest, BundleModule, FORMAT};
-    use geko_module_sdk::module::{CONTRACT, CommandInfo, Context, DataPolicy, Method, ModuleName, Route};
+    use geko_module_sdk::module::{CommandInfo, Context, DataPolicy, Method, ModuleName, Route};
     use geko_module_sdk::scope::Scope;
 
     #[derive(Default)]
@@ -132,7 +132,6 @@ pub mod tests {
             Description {
                 name: ModuleName::new("fake").unwrap(),
                 version: "1.0.0".into(),
-                contract: CONTRACT,
                 routes: vec![Route { method: Method::Post, path: "v1/echo".into(), pool: true, public: false }],
                 openapi: None,
                 attribution: None,
@@ -188,7 +187,7 @@ pub mod tests {
     }
 
     pub fn bundle(version: &str) -> BundleView {
-        let module = BundleModule { name: ModuleName::new("fake").unwrap(), version: "1.0.0".into(), contract: CONTRACT, meta: serde_json::Value::Null };
+        let module = BundleModule { name: ModuleName::new("fake").unwrap(), version: "1.0.0".into(), meta: serde_json::Value::Null };
         let manifest = BundleManifest { format: FORMAT, version: version.into(), created_unix: 0, modules: vec![module.clone()], licenses: vec![], artifacts: vec![] };
         BundleView { root: PathBuf::from("/nonexistent"), manifest, module }
     }

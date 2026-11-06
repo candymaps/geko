@@ -37,15 +37,31 @@ pub struct LicenseNotice {
 
 /// The part of a bundle that one module built.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(into = "WrittenModule")]
 pub struct BundleModule {
     pub name: ModuleName,
     /// The version of the module that built it: the one that serves it.
     pub version: String,
-    /// The contract that module implements (`module::CONTRACT`).
-    pub contract: u32,
     /// What the module needs to load its part, as it wrote it.
     #[serde(default)]
     pub meta: serde_json::Value,
+}
+
+/// How a `BundleModule` is written, in the manifest and in `Call::Load`: with the `contract` that
+/// the modules built with the tag `sdk-1` still require to read it. It goes when `modules.lock` has
+/// none of them left (docs/MODULE_UPDATES_PLAN.md, step 4.8).
+#[derive(Serialize)]
+struct WrittenModule {
+    name: ModuleName,
+    version: String,
+    contract: u32,
+    meta: serde_json::Value,
+}
+
+impl From<BundleModule> for WrittenModule {
+    fn from(m: BundleModule) -> Self {
+        Self { name: m.name, version: m.version, contract: 1, meta: m.meta }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,6 +123,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_entry_is_written_as_the_modules_of_sdk_1_read_it() {
+        let entry = BundleModule { name: ModuleName::new("tiles").unwrap(), version: "1.0.0".into(), meta: serde_json::Value::Null };
+        let written = serde_json::to_value(&entry).unwrap();
+        assert_eq!(written["contract"], 1);
+        assert_eq!(serde_json::from_value::<BundleModule>(written).unwrap(), entry, "and read back");
+    }
+
+    #[test]
     fn a_bundle_of_another_format_says_so() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(MANIFEST), r#"{"version":"v1","created_unix":0,"modules":["geocoder"],"segments":[],"licenses":[],"artifacts":[]}"#).unwrap();
@@ -117,7 +141,7 @@ mod tests {
             format: FORMAT,
             version: "v2".into(),
             created_unix: 1,
-            modules: vec![BundleModule { name: ModuleName::new("geocoder").unwrap(), version: "1.0.0".into(), contract: 1, meta: serde_json::json!({"a": 1}) }],
+            modules: vec![BundleModule { name: ModuleName::new("geocoder").unwrap(), version: "1.0.0".into(), meta: serde_json::json!({"a": 1}) }],
             licenses: vec![],
             artifacts: vec![],
         };
