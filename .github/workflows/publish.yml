@@ -70,7 +70,7 @@ jobs:
           image=1
           before="${{ github.event.before }}"
           if [ "$release" = 0 ] && git cat-file -e "$before^{commit}" 2> /dev/null \
-            && git diff --quiet "$before" HEAD -- crates Cargo.toml Cargo.lock rust-toolchain.toml Dockerfile; then
+            && git diff --quiet "$before" HEAD -- crates Cargo.toml Cargo.lock rust-toolchain.toml Dockerfile modules.lock; then
             image=0
           fi
           {
