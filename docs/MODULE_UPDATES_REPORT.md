@@ -1,8 +1,8 @@
-# Actualización de módulos: estado actual y mejoras
+# Actualización de módulos: estado actual y modelo propuesto
 
 Fecha: 2026-11-06. Base: `dev` en `61c7488`, en la rama `feature/module-updates`. Analiza el código de `geko`, `geko-geocoder`, `geko-tiles` y `geko-router`, y lo publicado en `ghcr.io/candymaps` ese día. Las rutas de código son relativas a este repositorio, salvo las que nombran otro.
 
-Las especificaciones siguen siendo `MODULES_PLAN.md` y `PROJECT.md`. Este informe describe lo que hace el código, y la sección 7 lista dónde se separa de ellas.
+Las especificaciones siguen siendo `MODULES_PLAN.md` y `PROJECT.md`. Este informe describe lo que hace el código, y la sección 8 lista dónde se separa de ellas. La sección 9 propone el modelo acordado para sustituir el actual; las secciones 2 a 8 describen el sistema de hoy.
 
 ## 1. Resumen
 
@@ -12,6 +12,7 @@ Las especificaciones siguen siendo `MODULES_PLAN.md` y `PROJECT.md`. Este inform
 - **Fijar versiones:** sí, con `[modules.<m>] version`, solo con versión exacta y solo en descargas. En imágenes del modo operador y con `GEKO_MODULES` se ignora sin aviso.
 - **Compatibilidad:** un entero (`CONTRACT`) comparado por igualdad, más la plataforma y la firma. No hay «host mínimo» ni rangos de contratos, aunque el plan los describe.
 - **El problema principal:** el servidor exige que el módulo cargado sea *exactamente* la versión que generó el bundle, pero al arrancar elige el último publicado, sin mirar el bundle. Por eso **basta publicar un módulo y reiniciar para dejar el servicio sin datos** (P1, reproducido).
+- **Propuesta:** cada versión del host fija la versión exacta de sus módulos, que van dentro de la imagen y se prueban antes de publicar. Desaparecen `CONTRACT`, las etiquetas de SDK y la descarga de módulos en ejecución (sección 9).
 
 ## 2. Qué se descarga
 
@@ -209,62 +210,73 @@ No es un problema hoy `MAX_BLOB` (256 MiB, y lo más grande son 18,2 MiB), aunqu
 
 `Slot`, `Reopen` y `a_bundle_of_another_version_of_the_module_switches_to_it` son piezas de cambio en caliente que quedaron de `ProcessModule`: están probadas, pero el host real nunca las usa con éxito.
 
-## 9. Propuesta
+## 9. Modelo propuesto: cada host fija sus módulos
 
-Ordenada para que cada fase se pueda fusionar por separado y deje el sistema mejor.
+Acordado el 2026-11-06, tras este análisis. Sustituye a la idea de resolver versiones en cada instalación: casi todos los problemas de la sección 7 vienen de combinar host y módulos al arrancar. La combinación pasa a decidirse al publicar el host.
 
-### Fase 0: red de seguridad
+### Principios
 
-- Montar un registro local en las pruebas (`registry:2` u OCI simulado) con módulos firmados con una clave de prueba: descarga, actualización, digest cambiado y fallos (P11).
-- Convertir las reproducciones de este informe en pruebas de regresión.
+- **Solo se elige la versión del host.** Cada versión del host fija la versión exacta de cada módulo, y no se puede cambiar.
+- **Los módulos van dentro de la imagen.** Los tres suman unos 32 MiB, y Docker es la única distribución. En ejecución no se descarga ningún módulo.
+- **La compatibilidad de código se comprueba antes de publicar,** no en cada instalación. Por eso no hacen falta `CONTRACT` ni etiquetas de SDK.
+- **La compatibilidad de datos se mantiene,** porque bundles y packs no se publican con el host.
 
-### Fase 1: que publicar un módulo no tire nada (P1, P2, P4, P12)
+### Flujo
 
-- **`serve` abre la versión del bundle en `current`**, bajándola si falta, tal como ya dice la especificación. Esto arregla P1 y hace que un reinicio deje de ser una actualización implícita.
-- **Carga en dos fases:** comprobar todos los módulos antes de cargar ninguno. Si uno falla, no se carga nada, y ese bundle se recuerda como rechazado para no reintentarlo en cada tick.
-- **Copia en disco ante cualquier fallo de descarga,** con aviso.
-- **`/ready` y `/health` honestos:** un `bundle_error` sin bundle cargado no debe parecer «ok». Corregir el mensaje de error.
-- Ordenar las compilaciones por commit por fecha, guardada en una anotación, o dejar de comparar sus hash.
+1. Cada módulo publica su paquete firmado, como ahora, sin la etiqueta `contract-<n>`.
+2. El repositorio del host guarda en un fichero la versión y el digest de cada módulo. Un PR automático lo actualiza cuando sale una versión de un módulo.
+3. Al construir la imagen, se bajan esos paquetes, se verifican firma y digest, y se copian dentro. geko los lee de `GEKO_MODULES`.
+4. La CI del host carga cada `.so` real, pasa la suite de conformidad y hace un build y un `serve` de Luxemburgo. Si algo falla, no hay release.
 
-### Fase 2: actualizaciones visibles y explícitas (P3, P5, P6, P8)
+Se usan los binarios publicados, y no una compilación en el host, para distribuir los mismos bytes que pasaron las pruebas de cada módulo y para que la release no compile nada. A cambio, un desajuste en la frontera de la biblioteca no lo ve el compilador, porque por ella solo pasan bytes: por eso la prueba del paso 4 debe ejercitar el módulo, incluido el build, que la suite de conformidad no toca.
 
-- **Separar «mirar» de «instalar»:** `geko modules status` (qué corre, qué generó el bundle, qué hay publicado) y `geko modules update`. `geko plan` deja de instalar.
-- **Política en `geko.toml`:** `[modules] update = "manual" | "notify" | "auto"`. `geko up` comprueba cada cierto tiempo y aplica la política.
-- **Exponerlo** en `/health`, en `geko_module_info` de `/metrics` y en el dashboard.
-- **Error o aviso claro** cuando `version` no se puede aplicar (`GEKO_MODULES`, modo operador).
-- **`contract-<n>` solo en releases.** Un push sin subir versión queda disponible por su etiqueta exacta, pero no llega a todos.
-- **Canales** (`stable`, `candidate`) y `yanked`, si hacen falta. Propongo esperar a tener instalaciones reales.
+### La SDK
 
-### Fase 3: cambio de versión en marcha (necesita una decisión)
+El crate `geko-module-sdk` se queda: es la interfaz que implementan los módulos, y sin él no compilan. Deja de ser un producto versionado:
 
-Con `update = "auto"`, `geko up` debe generar con la versión nueva y seguir sirviendo con la vieja hasta tener bundle. Para eso conviene que **el build sea un proceso hijo** (`geko build`), que además devuelve la memoria al sistema, un coste que el plan aceptó al elegir `DylibModule`. Para pasar al módulo nuevo hay dos caminos:
+```toml
+geko-module-sdk = { git = "https://github.com/candymaps/geko.git", branch = "dev" }
+```
 
-| | A: reiniciar el proceso | B: cargar la biblioteca nueva |
-| --- | --- | --- |
-| Cómo | Con el bundle listo, `geko` se relanza (`exec`) | `reopen` abre la otra carpeta y `Slot` cambia, como ya prueba el servidor |
-| Corte | Lo que tarde en cargar el bundle | Ninguno |
-| Riesgo | Bajo | Dos versiones en un proceso: memoria doble en el cambio, hilos y estado global del módulo viejo; hay que decidir si la biblioteca se descarga alguna vez |
-| Trabajo | Poco | Medio, con medición |
+Una etiqueta de release del host no sirve aquí: el host `v<n>` fija módulos ya publicados, y si esos módulos necesitan algo nuevo de la SDK, deben compilarse antes de que exista `v<n>`. Seguir `dev` evita esa dependencia circular. La compilación sigue siendo reproducible, porque `Cargo.lock` guarda el commit y la CI compila con `--locked`; se pasa a una SDK nueva con `cargo update` cuando se quiere.
 
-**Recomiendo empezar por A**, sin cortes en el modo operador, que tiene despliegues graduales. B se puede añadir después si se mide que el corte importa.
+### Qué se elimina y qué se queda
 
-### Fase 4: compatibilidad real (P7, P9, P10, P13, P15)
+| Se elimina | Se queda |
+| --- | --- |
+| `CONTRACT`, el saludo con contrato y `contract` en bundles y `module.toml` | El crate `geko-module-sdk` |
+| Etiquetas `contract-<n>` y `sdk-<n>`, y `ci/modules.sh check` | Los paquetes firmados de los módulos, verificados al construir la imagen |
+| `store.rs`, y `[modules.<m>] version` y `registry` (con un error claro si siguen en `geko.toml`) | Los packs de país, su `format-<n>` y su firma |
+| `geko purge modules` | `GEKO_MODULES`, para la imagen y para desarrollo |
+| Las imágenes por módulo y `refresh-image.yml` | El formato del manifiesto del bundle |
 
-- **Formato de parte por módulo:** el módulo declara el formato de su parte del bundle. Un cambio de versión con el mismo formato se sirve sin reconstruir, y un formato distinto se rechaza en todos los modos, también el operador. Es lo que convierte la igualdad exacta en una regla útil.
-- **Host mínimo y capacidades** del módulo.
-- **Cuidado al añadir campos:** `Package` y `Signature` tienen `deny_unknown_fields`, de modo que un campo nuevo en `module.toml` hace que **todos los hosts ya desplegados rechacen el módulo**. Los caminos seguros son una anotación nueva, comprobada antes de bajar, o un fichero firmado aparte, que los hosts antiguos ignoran. Conviene quitar esa restricción cuanto antes, porque solo surte efecto en los hosts que se actualicen.
-- **Rangos de contratos** en el host solo cuando exista un contrato 2 que lo pida.
-- **Comprobar la inmutabilidad** al publicar: el flujo falla si la etiqueta de versión ya existe con otro digest. Guardar el digest aceptado por versión.
-- **Sello con la versión del módulo:** decidir entre invalidar etapas por versión (seguro, más lento) o mantener las constantes con una comprobación en la CI (P9).
+Se pierde que un arreglo de un módulo llegue sin release del host, y que se puedan instalar módulos de terceros desde un registro: solo por `GEKO_MODULES`, montando una carpeta. Un módulo desactivado ocupa disco, aunque no se carga.
 
-Credenciales (P14), cerrojo (P16), digest en el operador (P17) y limpieza (P18) son independientes y pueden ir cuando convenga.
+### Fases
 
-### Decisiones pendientes
+1. **Comprobar la combinación.** Fichero de versiones y trabajo de CI del paso 4, sin cambiar nada más. Medir cuánto tarda.
+2. **Arreglar la carga de bundles.** Un número de formato de datos por módulo sustituye a la igualdad exacta de versión, en todos los modos, y la carga pasa a ser en dos fases: se comprueban todos los módulos antes de cargar ninguno, y un bundle rechazado no se reintenta en cada recarga. `/ready` y `/health` dejan claro cuándo no hay bundle. Debe ir antes que la fase 3: sin ella, actualizar el host da 503 hasta terminar el build.
+3. **Módulos en la imagen.** Una sola imagen, también para el operador (`--image`), y fuera las imágenes por módulo.
+4. **Borrar.** `store.rs`, las opciones de `[modules.<m>]`, `CONTRACT`, las etiquetas y `ci/modules.sh check`. Los módulos pasan a `branch = "dev"`.
+5. **Documentación.** `PROJECT.md`, `MODULES_PLAN.md`, `README.md`, `jekyll/` y, en `geko-context`, `AGENTS.md` y `docs/architecture.md`.
 
-1. **Política por defecto para instalaciones nuevas:** recomiendo `notify`. Se pierde «un arreglo llega sin release del host» sin intervención, pero ninguna actualización ocurre sin que alguien lo pida. `auto` mantiene esa promesa con más riesgo.
-2. **Fase 3:** A o B.
-3. **¿Se mantiene el modelo `contract-<n>` como «último»?** Recomiendo que sí, limitado a releases.
-4. **¿Hace falta conservar el bundle anterior por defecto?** `[build] keep = 1` impide volver atrás; con `2` hay una vuelta atrás real, a costa de disco.
+### Qué pasa con cada problema
+
+| Problemas | Resultado |
+| --- | --- |
+| P1 | Desaparece al reiniciar. Al actualizar el host, lo resuelve el formato de datos (fase 2) |
+| P3, P5, P6, P8, P10, P12, P13, P15, P16, P17, P18 | Desaparecen: solo hay una versión posible, fijada por digest y probada antes |
+| P4 | Desaparece para módulos. El host no los descarga |
+| P11 | Sustituido por la prueba de la fase 1 |
+| P2, P7 | Se arreglan en la fase 2 |
+| P9 | Sigue abierto: decidir entre invalidar etapas por versión o comprobar las constantes en la CI |
+| P14 | Sigue para los packs de país, que se bajan de forma anónima |
+
+### Pendiente de decidir
+
+- **`[build] keep`:** con `1` no se puede volver al bundle anterior tras actualizar el host; con `2` sí, a costa de disco.
+- **Automatización del fichero de versiones:** qué dispara el PR y si la release del host es automática o la lanza alguien.
+- **Enlazar los módulos en un solo binario:** queda fuera de este plan. Quitaría `wire`, `Remote` y `dylib`, pero exige medir y revisar la regla de que el host no depende de ningún módulo.
 
 ## 10. Cómo se comprobó
 
