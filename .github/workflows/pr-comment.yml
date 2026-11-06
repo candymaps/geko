@@ -39,8 +39,7 @@ jobs:
             // What merging it changes of what the modules build against (ci.yml, `warnings`): a
             // run from before the field has none.
             const warningTexts = {
-              'contract': '⚠️ **Merging this pull request changes the contract** (`CONTRACT` in `module.rs`): every module of `ci/modules` must follow it, and the modules move to the new tag `sdk-<contract>`.',
-              'sdk': '⚠️ **Merging this pull request changes the SDK** (`crates/geko-module-sdk`): the tag `sdk-<contract>` moves on the push to `main`, and the modules build against the new one.',
+              'sdk': '⚠️ **Merging this pull request changes the SDK** (`geko-module-sdk`, `geko-fetch` or `geko-artifact`): if its version already has a tag `sdk-v<version>`, raise it in the three crates, or publishing fails.',
             };
             const warnings = typeof pr.warnings === 'string' ? pr.warnings.split(' ').filter(Boolean) : [];
             if (!Number.isInteger(pr.number) || !(pr.result in texts) || pr.head !== run.head_sha || !warnings.every(w => w in warningTexts)) {
