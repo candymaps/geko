@@ -184,15 +184,6 @@ impl Opener {
         Ok(opened)
     }
 
-    /// The module `name` of `version`, the one a bundle was built by, to serve it: `None` when the
-    /// module in service is kept (one linked in or of `GEKO_MODULES`, which serve as they are). A
-    /// downloaded one is a library, which stays loaded: another version needs a restart.
-    pub fn reopen(&self, name: &ModuleName, version: &str, current: &Origin) -> Result<Option<Arc<dyn Module>>> {
-        let Origin::Downloaded { .. } = current else { return Ok(None) };
-        Err(GekoError::Incompatible(format!(
-            "the bundle was built by module `{name}` {version}: a module loaded as a library changes its version only when geko restarts"
-        )))
-    }
 }
 
 fn check(name: &ModuleName, module: &dyn Module) -> Result<()> {
@@ -306,14 +297,5 @@ mod tests {
         assert_eq!(o.open(&name("geocoder")).unwrap().origin, Origin::Linked);
         let err = o.open(&name("tiles")).err().unwrap().to_string();
         assert!(err.contains("not downloaded") && err.contains("DEV_MODULES=…,tiles"), "{err}");
-    }
-
-    #[test]
-    fn modules_linked_in_or_local_are_kept_whatever_the_bundle() {
-        let data = tempfile::tempdir().unwrap();
-        let o = opener(vec![], "", data.path());
-        assert!(o.reopen(&name("geocoder"), "2.0.0", &Origin::Linked).unwrap().is_none());
-        let library = Origin::Downloaded { how: String::new(), fixed: false };
-        assert!(o.reopen(&name("geocoder"), "2.0.0", &library).err().unwrap().to_string().contains("restarts"));
     }
 }

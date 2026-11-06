@@ -1,0 +1,86 @@
+# Plan de actualización de módulos
+
+Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
+
+**Objetivo:** solo se elige la versión del host, y ella decide exactamente qué módulos lleva. La compatibilidad de código se comprueba al publicar, y cada módulo funciona de forma independiente.
+
+⏸ marca una parada: alguien tiene que fusionar y publicar antes de seguir.
+
+## Fase 1: comprobar la combinación (host)
+
+- [x] 1.1. Crear `modules.lock` en la raíz, con versión y digest de geocoder `0.3.0`, tiles `0.3.0` y router `0.1.0`.
+- [x] 1.2. Crear `ci/modules.sh pull <carpeta>`, que baja cada paquete por digest y verifica firma y versión.
+- [x] 1.3. Crear la prueba que carga cada `.so` real y pasa la suite de conformidad.
+- [x] 1.4. Crear la prueba de humo: build y `serve` de Luxemburgo con los tres módulos.
+- [x] 1.5. Crear el workflow `modules.yml`, para los PR que cambien `modules.lock` o la SDK.
+- [x] 1.6. Hacer que `publish.yml` exija ese mismo trabajo.
+- [ ] 1.7. Crear un workflow programado que compare el registro con `modules.lock` y abra el PR a `dev`. Escrito (`modules-update.yml`); falta el secreto `GEKO_MODULES_PR_TOKEN`, y sin él avisa y no hace nada.
+- [x] 1.8. Medir cuánto tarda.
+
+Medido el 2026-11-06, en WSL, sin compilar geko desde cero:
+
+| Parte | Tiempo |
+| --- | --- |
+| `pull` | 19 s |
+| `conformance` | 5 s |
+| `smoke`, con las descargas ya hechas | 92 s, de ellos 56 s de Planetiler |
+
+Sin medir: la primera ejecución con todas las descargas (los polígonos de `osmdata` son 1,8 GB), porque `osmdata.openstreetmap.de` estaba caído. La prueba de humo se ejecutó con los polígonos del golden de Baleares, de modo que Luxemburgo salió sin agua ni tierra. Tampoco han corrido los workflows en GitHub: solo los ha validado `actionlint`.
+
+Comprobado que falla cuando debe: con una `.so` manipulada, un digest falso y una versión que no coincide.
+
+La prueba de humo reutiliza las descargas de la última ejecución buena, en modo `offline`, porque `geko` consulta las fuentes aunque tenga la copia: sin eso, una fuente caída bloquearía una release.
+
+## Fase 2: módulos independientes
+
+- [ ] 2.1. Geocoder: validar el formato de sus datos en `load`.
+- [ ] 2.2. Router: lo mismo.
+- [ ] 2.3. ⏸ Publicar geocoder y router, y actualizar `modules.lock`.
+- [ ] 2.4. Host: dejar de comparar versiones al cargar un bundle.
+- [ ] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
+- [ ] 2.6. Host: `/health`, `/ready` y atribución por módulo.
+- [ ] 2.7. Host: `[build] keep = 2` por defecto.
+- [ ] 2.8. Host: build independiente, en un PR aparte.
+
+## Fase 3: módulos en la imagen
+
+- [ ] 3.1. `Dockerfile`: copiar a la imagen los paquetes de `modules.lock`, ya verificados.
+- [ ] 3.2. Operador y manifiestos: una sola imagen por defecto, y revisar `geko-minik8s`.
+- [ ] 3.3. ⏸ Publicar el host con esa imagen y comprobarla en kind.
+- [ ] 3.4. Geocoder y tiles: quitar `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen.
+
+## Fase 4: borrar lo que sobra
+
+- [ ] 4.1. SDK: darle versión propia en sus tres crates, y que `publish.yml` cree `sdk-v<versión>`.
+- [ ] 4.2. Quitar `CONTRACT`: saludo, `Description`, bundles y `module.toml`.
+- [ ] 4.3. Quitar `store.rs`, `geko purge modules`, y `[modules.<m>] version` y `registry`, con un error claro si siguen en `geko.toml`.
+- [ ] 4.4. Quitar `ci/modules`, `ci/modules.sh check` y sus pasos en `ci.yml`, `publish.yml` y `pr-comment.yml`.
+- [ ] 4.5. ⏸ Publicar el host, que crea la primera `sdk-v<versión>`.
+- [ ] 4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`.
+- [ ] 4.7. ⏸ Publicar los módulos y actualizar `modules.lock`.
+
+## Fase 5: documentación
+
+- [ ] 5.1. `PROJECT.md`, `MODULES_PLAN.md`, `README.md` y `jekyll/`.
+- [ ] 5.2. `AGENTS.md` de cada repositorio.
+- [ ] 5.3. `AGENTS.md` y `docs/architecture.md` de `geko-context`.
+
+## Antes de empezar
+
+- **No puede ir todo del tirón:** hay 4 paradas (2.3, 3.3, 4.5 y 4.7), porque esos pasos publican en `main`. Cada PR queda listo, y se sigue cuando esté publicado. Entre paradas se puede avanzar seguido.
+- **El paso 1.7 necesita un token.** GitHub no lanza las pruebas en los PR que abre el token por defecto de Actions, así que hará falta un token personal o una GitHub App como secreto del repositorio. Si aún no existe, ese paso se deja para el final.
+- **Las etiquetas ya publicadas se quedan:** `contract-1` y `sdk-1` no se borran, porque las usan los hosts instalados y los commits antiguos de los módulos. Solo dejan de moverse.
+- **El orden de las publicaciones es parte del plan:** los paquetes actuales siguen funcionando hasta 4.7. Hasta ese paso, el host aún tiene que aceptar los módulos publicados con contrato.
+
+## Decisiones
+
+- Publicar sigue siendo fusionar a mano el PR de `dev` a `main`.
+- Los módulos no se compilan en el host: siguen siendo `.so` separadas, publicadas y firmadas desde su repositorio, y la CI del host prueba esos mismos binarios.
+- La SDK se queda en este repositorio, con etiquetas inmutables `sdk-v<versión>`.
+- `modules.lock` va en la raíz: `protected.yml` solo deja al propietario cambiar `ci/`, y un PR automático fallaría.
+
+## Fuera del plan
+
+- **Extraer la SDK a `geko-sdk`:** deseable, sin fecha.
+- **Enlazar los módulos en un solo binario:** exigiría medir y revisar la regla de que el host no depende de ningún módulo.
+- **Hash de código en tiles y router** (P9 del informe): propuesto, independiente de este plan.

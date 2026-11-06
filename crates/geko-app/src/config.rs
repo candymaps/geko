@@ -177,15 +177,16 @@ impl DataConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct BuildConfig {
-    /// Published versions kept, the served one included. One by default: an older version costs
-    /// almost a whole segment of disk (bundles share only the files that did not change), and a
-    /// server that still has it loaded keeps reading it, since every file is opened at load.
+    /// Published versions kept, the served one included. Two by default, to go back to the one
+    /// before after an update, or if a module rejects the new one. An older version costs almost a
+    /// whole segment of disk (bundles share only the files that did not change); with one, a server
+    /// that still has it loaded keeps reading it, since every file is opened at load.
     pub keep: usize,
 }
 
 impl Default for BuildConfig {
     fn default() -> Self {
-        Self { keep: 1 }
+        Self { keep: 2 }
     }
 }
 
@@ -347,7 +348,7 @@ mod tests {
         assert_eq!(c.data.refresh, Refresh::IfChanged);
         assert_eq!(c.data.max_age_days, 30);
         assert!(!c.data.keep_downloads);
-        assert_eq!(c.build.keep, 1);
+        assert_eq!(c.build.keep, 2);
         assert!(c.scope().unwrap().is_empty());
     }
 

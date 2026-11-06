@@ -1,0 +1,13 @@
+# The geko.toml of ci/modules.sh smoke: every module on Luxembourg, the smallest country with a
+# golden, so that a build takes minutes.
+[modules]
+geocoder = true
+tiles    = true
+router   = true
+
+[[scope]]
+country = "LU"
+
+[data]
+accept_licenses = true
+keep_downloads  = true

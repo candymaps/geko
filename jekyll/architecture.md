@@ -114,8 +114,9 @@ geko/
   contracts it understands. With a module active, the host downloads the newest one of the highest
   contract it understands: a fix to the geocoder arrives without a release of the host.
 - **A pinned version** is optional: `[modules.geocoder] version = "1.4.2"` (production, going back).
-- **The bundle fixes the version it is served with.** Its manifest keeps the exact version of the module
-  that built it, and `geko serve` uses that one.
+- **Each module judges its own part of a bundle.** Its manifest keeps the exact version of the module that
+  built it, as a record: `geko serve` does not compare it. The module loads what it can read, and rejects
+  the rest. One that rejects a bundle goes on with the one it had, and the others load it.
 - **A version that does not fit the host** is an error in `plan`, `fetch`, `build`, `up` and `serve`,
   before touching any source, with the compatible versions and the way out: remove `version` to use the
   newest compatible one. geko never chooses another one silently.
