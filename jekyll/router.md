@@ -31,7 +31,7 @@ All under `/router/`:
 | `/router/v1/trip` | A good order to visit up to 100 points, and its routes, by `GET` or `POST`. It is a heuristic, not always the best order. |
 | `/router/v1/status` | The size of the graph, where it is and the state of traffic. |
 | `/router/openapi.yaml` | Its API, also listed in `/docs`. |
-| `/router/` | A demo: click on the map for the start and the end. |
+| `/router/` | A demo of routes, isochrones, trips and map matching: click on the map. |
 
 ## Enable it
 
