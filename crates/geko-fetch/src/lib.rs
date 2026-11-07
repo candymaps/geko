@@ -6,6 +6,7 @@ mod record;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -57,6 +58,8 @@ impl Default for HttpDownloaderConfig {
 pub struct HttpDownloader {
     agent: ureq::Agent,
     config: HttpDownloaderConfig,
+    /// A source did not answer and its copy was kept: this run did not really check for updates.
+    copy_kept: AtomicBool,
 }
 
 /// Metadata of an in-progress `.part` file, so an interrupted download can resume safely.
@@ -94,7 +97,7 @@ impl HttpDownloader {
             .timeout_read(config.read_timeout)
             .user_agent(concat!("geko/", env!("CARGO_PKG_VERSION")))
             .build();
-        Self { agent, config }
+        Self { agent, config, copy_kept: AtomicBool::new(false) }
     }
 
     fn attempt(&self, req: &DownloadRequest, dest: &Path, cached: Option<&RawRecord>) -> std::result::Result<Attempt, AttemptError> {
@@ -239,6 +242,15 @@ impl Downloader for HttpDownloader {
                     thread::sleep(delay);
                     delay *= 2;
                 }
+                // A source that is down says nothing of the copy, which stays. A 404 does say something.
+                Err(e) if e.retryable => match cached.as_ref().filter(|r| still_valid(r, req)) {
+                    Some(rec) => {
+                        tracing::warn!(url = %req.url, error = %e.error, "the source did not answer: keeping the copy there is");
+                        self.copy_kept.store(true, Ordering::Relaxed);
+                        return Ok(kept(rec));
+                    }
+                    None => return Err(e.error),
+                },
                 Err(e) => return Err(e.error),
             }
         }
@@ -246,7 +258,7 @@ impl Downloader for HttpDownloader {
     }
 
     fn checks_for_updates(&self) -> bool {
-        !self.config.offline && self.config.policy != RefreshPolicy::Never
+        !self.config.offline && self.config.policy != RefreshPolicy::Never && !self.copy_kept.load(Ordering::Relaxed)
     }
 
     fn keeps_removed(&self) -> bool {
@@ -309,6 +321,12 @@ impl HttpDownloader {
         }
         unreachable!("the last attempt always returns")
     }
+}
+
+/// Whether a copy can stand in for what `req` asks for. A sha256 that is no longer the one of the copy
+/// asks for other bytes. The record has no md5, and an md5 only says what the source has now.
+fn still_valid(record: &RawRecord, req: &DownloadRequest) -> bool {
+    !matches!(&req.checksum, Some(Checksum::Sha256(wanted)) if !wanted.trim().eq_ignore_ascii_case(&record.sha256))
 }
 
 /// What `url` answers to a GET, as text: no retries, no proxy and no more than `max_bytes`, for what
