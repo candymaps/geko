@@ -9,7 +9,7 @@ mod dashboard;
 mod metrics;
 mod ui;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,72 +24,23 @@ use axum::routing::{MethodRouter, get, post};
 use axum::{Json, Router};
 use geko_module_sdk::Result;
 use geko_module_sdk::bundle::{BundleManifest, LicenseNotice, current_version};
-use geko_module_sdk::module::{self, BundleView, Description, Method, Module, ModuleName, Request};
+use geko_module_sdk::module::{self, BundleView, Description, Method, Module, Request};
 use serde_json::json;
 
 pub use access::Access;
 pub use dashboard::{ModuleStatus, PodAnswer, Pods, Statuses, serve as serve_dashboard};
-
-/// The module behind a mount, which a bundle built by another version of it switches to that
-/// version (`Reopen`); requests in flight finish on the one they started on.
-struct Slot {
-    current: ArcSwap<(Arc<dyn Module>, String)>,
-}
-
-impl Slot {
-    fn module(&self) -> Arc<dyn Module> {
-        Arc::clone(&self.current.load().0)
-    }
-
-    fn version(&self) -> String {
-        self.current.load().1.clone()
-    }
-
-    fn switch(&self, module: Arc<dyn Module>) {
-        let version = module.describe().version;
-        self.current.store(Arc::new((module, version)));
-    }
-}
-
-impl Module for Slot {
-    fn describe(&self) -> Description {
-        self.module().describe()
-    }
-
-    fn load(&self, bundle: &BundleView) -> Result<()> {
-        self.module().load(bundle)
-    }
-
-    fn handle(&self, request: Request) -> module::Response {
-        self.module().handle(request)
-    }
-
-    fn metrics(&self, out: &mut String) {
-        self.module().metrics(out)
-    }
-
-    fn shutdown(&self) -> Result<()> {
-        self.module().shutdown()
-    }
-
-    fn unavailable(&self) -> Option<String> {
-        self.module().unavailable()
-    }
-}
 
 /// An active module and what it said it is.
 #[derive(Clone)]
 pub struct Mounted {
     pub module: Arc<dyn Module>,
     pub description: Description,
-    slot: Arc<Slot>,
 }
 
 impl Mounted {
     pub fn new(module: Arc<dyn Module>) -> Self {
         let description = module.describe();
-        let slot = Arc::new(Slot { current: ArcSwap::from_pointee((module, description.version.clone())) });
-        Self { module: Arc::clone(&slot) as Arc<dyn Module>, description, slot }
+        Self { module, description }
     }
 
     fn name(&self) -> &str {
@@ -106,62 +57,119 @@ impl Mounted {
 /// on another machine and published where this one pulls them from.
 pub type Pull = Arc<dyn Fn() -> Result<()> + Send + Sync>;
 
-/// The module `name` of the version a bundle was built by, to serve that bundle with it; `None`
-/// keeps the one in service (a module linked in, or one of `GEKO_MODULES`).
-pub type Reopen = Arc<dyn Fn(&ModuleName, &str) -> Result<Option<Arc<dyn Module>>> + Send + Sync>;
-
 #[derive(Clone)]
 pub struct BundleSource {
     pub dir: PathBuf,
     /// How often to look for a new `current` version.
     pub reload: Duration,
     pub pull: Option<Pull>,
-    pub reopen: Option<Reopen>,
 }
 
-/// Loads the `current` bundle into every module and keeps watching for new versions.
+/// Why a module did not take a bundle.
+#[derive(Clone)]
+enum Skipped {
+    /// The bundle has no part of it.
+    NoPart,
+    Rejected(String),
+}
+
+/// How a module stands with the bundles.
+#[derive(Clone, Default)]
+struct Part {
+    /// The version it serves, with the licenses of the sources of that bundle.
+    serving: Option<(String, Vec<LicenseNotice>)>,
+    /// The last version it did not take, which it does not try again: it goes on with the one it
+    /// serves, if any, until there is another.
+    skipped: Option<(String, Skipped)>,
+}
+
+impl Part {
+    fn settled(&self, version: &str) -> bool {
+        self.serving.as_ref().is_some_and(|s| s.0 == version) || self.skipped.as_ref().is_some_and(|s| s.0 == version)
+    }
+}
+
+/// Loads the `current` bundle into every module and keeps watching for new versions. Each module
+/// goes on its own: whether it can read its part is its own business (`Module::load`), it serves as
+/// soon as it has loaded it, and one that rejects a bundle holds back no other.
 pub struct BundleManager {
     source: BundleSource,
     modules: Vec<Mounted>,
-    loaded: ArcSwapOption<(String, Vec<LicenseNotice>)>,
-    /// Why the last bundle published could not be loaded, for `/health`.
+    parts: Vec<ArcSwap<Part>>,
+    /// Why the last bundle published could not be read at all, for `/health`.
     error: ArcSwapOption<String>,
-    /// The modules that the loaded bundle has no part of, which serve nothing: for `/ready`.
-    waiting: ArcSwap<Vec<String>>,
 }
 
 impl BundleManager {
     pub fn new(source: BundleSource, modules: Vec<Mounted>) -> Self {
-        Self { source, modules, loaded: ArcSwapOption::empty(), error: ArcSwapOption::empty(), waiting: ArcSwap::from_pointee(Vec::new()) }
+        let parts = modules.iter().map(|_| ArcSwap::from_pointee(Part::default())).collect();
+        Self { source, modules, parts, error: ArcSwapOption::empty() }
     }
 
-    /// Why this server cannot answer yet, for `/ready`: no bundle loaded, a module without its part of
-    /// it, or a module that says it is not available. Empty when it can.
-    pub fn waiting_for(&self) -> Vec<String> {
-        if self.loaded.load().is_none() {
-            return vec!["a bundle".to_owned()];
+    fn part(&self, module: &str) -> Option<Arc<Part>> {
+        self.modules.iter().position(|m| m.name() == module).map(|i| self.parts[i].load_full())
+    }
+
+    /// Why this server, or only its `module`, cannot answer yet: no bundle, a module without its part
+    /// of it, one that rejected it with nothing to go on with, or one that says it is not available.
+    /// Empty when it can.
+    pub fn waiting_for(&self, module: Option<&str>) -> Vec<String> {
+        let mut waiting: Vec<String> = Vec::new();
+        for (m, part) in self.modules.iter().zip(&self.parts).filter(|(m, _)| module.is_none_or(|n| n == m.name())) {
+            let part = part.load();
+            let why = match (&part.serving, &part.skipped) {
+                (Some(_), _) => None,
+                (None, Some((_, Skipped::NoPart))) => Some(format!("the part of {} in the bundle", m.name())),
+                (None, Some((_, Skipped::Rejected(why)))) => Some(format!("{}: {why}", m.name())),
+                (None, None) => Some("a bundle".to_owned()),
+            };
+            waiting.extend(why.filter(|w| !waiting.contains(w)));
+            waiting.extend(m.module.unavailable().map(|why| format!("{}: {why}", m.name())));
         }
-        let mut waiting: Vec<String> = self.waiting.load().iter().map(|m| format!("the part of {m} in the bundle")).collect();
-        waiting.extend(self.modules.iter().filter_map(|m| m.module.unavailable().map(|why| format!("{}: {why}", m.name()))));
         waiting
     }
 
+    /// Why the last bundle could not be read, or why each module that rejected it did.
     pub fn error(&self) -> Option<String> {
-        self.error.load_full().map(|e| (*e).clone())
+        let read = self.error.load_full().map(|e| (*e).clone());
+        let rejected = self.modules.iter().filter_map(|m| Some(format!("{}: {}", m.name(), self.error_of(m.name())?)));
+        let errors: Vec<String> = read.into_iter().chain(rejected).collect();
+        (!errors.is_empty()).then(|| errors.join("; "))
     }
 
+    /// Why `module` rejected the last bundle it looked at.
+    pub fn error_of(&self, module: &str) -> Option<String> {
+        match self.part(module)?.skipped.as_ref()? {
+            (_, Skipped::Rejected(why)) => Some(why.clone()),
+            (_, Skipped::NoPart) => None,
+        }
+    }
+
+    /// The newest version that some module serves.
     pub fn version(&self) -> Option<String> {
-        self.loaded.load_full().map(|v| v.0.clone())
+        self.parts.iter().filter_map(|p| p.load().serving.as_ref().map(|s| s.0.clone())).max()
     }
 
-    /// Licenses and attributions of the sources of the loaded bundle.
+    /// The version that `module` serves.
+    pub fn version_of(&self, module: &str) -> Option<String> {
+        self.part(module)?.serving.as_ref().map(|s| s.0.clone())
+    }
+
+    /// Licenses and attributions of the sources of the bundles being served.
     pub fn licenses(&self) -> Vec<LicenseNotice> {
-        self.loaded.load_full().map(|v| v.1.clone()).unwrap_or_default()
+        let mut licenses: Vec<LicenseNotice> = Vec::new();
+        for part in &self.parts {
+            for l in part.load().serving.iter().flat_map(|s| &s.1) {
+                if !licenses.iter().any(|k| k.source == l.source) {
+                    licenses.push(l.clone());
+                }
+            }
+        }
+        licenses
     }
 
-    /// Loads `current` if it differs from the loaded version, into every module that has a part
-    /// of it, switching a module to the version that built its part when that is another. On
-    /// error the previous bundle stays in service.
+    /// Offers `current` to every module that has not settled it, all at once: a module that takes
+    /// long holds back no other. Whether any took it; an error only if the bundle cannot be read.
     pub fn refresh(&self) -> Result<bool> {
         let refreshed = self.load_current();
         match &refreshed {
@@ -178,65 +186,79 @@ impl BundleManager {
             tracing::error!(error = %e, "cannot pull a new bundle; serving the local one");
         }
         let Some(version) = current_version(&self.source.dir) else { return Ok(false) };
-        if self.loaded.load().as_ref().is_some_and(|l| l.0 == version) {
+        if self.parts.iter().all(|p| p.load().settled(&version)) {
             return Ok(false);
         }
         let root = self.source.dir.join(&version);
         let manifest = BundleManifest::read(&root)?;
-        let started = Instant::now();
-        let mut without_part = Vec::new();
-        for m in &self.modules {
-            let Some(part) = manifest.module(&m.description.name) else {
-                tracing::warn!(module = m.name(), %version, "the bundle has no part of this module: it serves nothing");
-                without_part.push(m.name().to_owned());
-                continue;
-            };
-            if part.contract != m.description.contract {
-                return Err(geko_module_sdk::GekoError::Incompatible(format!(
-                    "bundle {version}: its {} part was built by a module of contract {}, and the module here is of contract {}",
-                    m.name(),
-                    part.contract,
-                    m.description.contract
-                )));
-            }
-            let view = BundleView { root: root.clone(), manifest: manifest.clone(), module: part.clone() };
-            let serving = m.slot.version();
-            if part.version != serving {
-                let reopened = match &self.source.reopen {
-                    Some(reopen) => reopen(&m.description.name, &part.version)?,
-                    None => None,
-                };
-                if let Some(module) = reopened {
-                    module.load(&view)?;
-                    m.slot.switch(module);
-                    tracing::info!(module = m.name(), from = serving, to = part.version, "switched to the version of the module that built the bundle");
-                    continue;
-                }
-                tracing::warn!(module = m.name(), built_by = part.version, serving, "the bundle was built by another version of the module");
-            }
-            m.module.load(&view)?;
-        }
-        tracing::info!(%version, elapsed = ?started.elapsed(), "bundle loaded");
-        self.waiting.store(Arc::new(without_part));
-        self.loaded.store(Some(Arc::new((version, manifest.licenses))));
-        Ok(true)
+        let (root, manifest) = (&root, &manifest);
+        Ok(std::thread::scope(|scope| {
+            let pending = self.modules.iter().zip(&self.parts).filter(|(_, part)| !part.load().settled(&manifest.version));
+            let loading: Vec<_> = pending.map(|(m, part)| scope.spawn(move || offer(m, part, root, manifest))).collect();
+            // Every one joined: a module that panics is one that did not take it.
+            let taken: Vec<bool> = loading.into_iter().map(|l| l.join().unwrap_or(false)).collect();
+            taken.contains(&true)
+        }))
     }
 
     fn watch(self: Arc<Self>) {
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(self.source.reload);
-            tick.tick().await;
+            let mut first = true;
             loop {
                 tick.tick().await;
                 let manager = Arc::clone(&self);
                 match tokio::task::spawn_blocking(move || manager.refresh()).await {
-                    Ok(Err(e)) => tracing::error!(error = %e, "new bundle not loaded; keeping the current one"),
+                    Ok(Err(e)) => tracing::error!(error = %e, "cannot read the current bundle; each module keeps the one it serves"),
                     Err(e) => tracing::error!(error = %e, "bundle reload task failed"),
+                    Ok(Ok(_)) if first && current_version(&self.source.dir).is_none() => {
+                        tracing::warn!("no bundle published yet (geko build, or the one geko up is running): serving 503 until one appears")
+                    }
                     Ok(Ok(_)) => {}
                 }
+                first = false;
             }
         });
     }
+}
+
+/// Offers its part of the bundle to a module, and notes how it went: whether it took it.
+fn offer(m: &Mounted, part: &ArcSwap<Part>, root: &std::path::Path, manifest: &BundleManifest) -> bool {
+    let version = &manifest.version;
+    let started = Instant::now();
+    let taken = match manifest.module(&m.description.name) {
+        None => {
+            tracing::warn!(module = m.name(), %version, "the bundle has no part of this module");
+            Err(Skipped::NoPart)
+        }
+        Some(own) if own.contract != m.description.contract => Err(Skipped::Rejected(format!(
+            "bundle {version}: its {} part was built by a module of contract {}, and the module here is of contract {}",
+            m.name(),
+            own.contract,
+            m.description.contract
+        ))),
+        Some(own) => {
+            let view = BundleView { root: root.to_path_buf(), manifest: manifest.clone(), module: own.clone() };
+            m.module.load(&view).map_err(|e| Skipped::Rejected(e.to_string()))
+        }
+    };
+    let now = part.load();
+    let next = match taken {
+        Ok(()) => {
+            tracing::info!(module = m.name(), %version, elapsed = ?started.elapsed(), "bundle loaded");
+            Part { serving: Some((version.clone(), manifest.licenses.clone())), skipped: None }
+        }
+        Err(skipped) => {
+            if let Skipped::Rejected(why) = &skipped {
+                let serving = now.serving.as_ref().map(|s| s.0.as_str());
+                tracing::error!(module = m.name(), %version, serving, error = why, "the module rejected the bundle; it is not tried again until there is another");
+            }
+            Part { serving: now.serving.clone(), skipped: Some((version.clone(), skipped)) }
+        }
+    };
+    let took = next.skipped.is_none();
+    part.store(Arc::new(next));
+    took
 }
 
 /// The reference of what every module shares, served at `/openapi.yaml`; `/docs` lists it with
@@ -250,6 +272,7 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
     let licenses = bundles.map(|b| b.licenses()).unwrap_or_default();
     let mut body = json!({
         "bundle": bundles.and_then(|b| b.version()),
+        "bundles": modules.iter().map(|m| (m.name().to_owned(), bundles.and_then(|b| b.version_of(m.name())).into())).collect::<serde_json::Map<_, _>>(),
         "contact": contact,
         "sources": licenses.iter().map(|l| json!({ "source": l.source, "license": l.name, "attribution": l.attribution, "url": l.url })).collect::<Vec<_>>(),
     });
@@ -261,9 +284,40 @@ fn attribution(modules: &[Mounted], bundles: Option<&BundleManager>, contact: Op
     body
 }
 
+/// Why this server, or only its module `only`, cannot answer yet.
+fn waiting(modules: &[Mounted], bundles: Option<&BundleManager>, only: Option<&str>) -> Vec<String> {
+    match bundles {
+        Some(b) => b.waiting_for(only),
+        None => modules.iter().filter(|m| only.is_none_or(|n| n == m.name())).filter_map(|m| m.module.unavailable().map(|why| format!("{}: {why}", m.name()))).collect(),
+    }
+}
+
+/// `/ready`: whether this server can answer, with what stops it and how each module stands;
+/// with `only`, about that module alone.
+fn readiness(modules: &[Mounted], bundles: Option<&BundleManager>, only: Option<&str>) -> (StatusCode, serde_json::Value) {
+    if let Some(name) = only.filter(|n| !modules.iter().any(|m| m.name() == *n)) {
+        return (StatusCode::NOT_FOUND, json!({ "error": format!("module `{name}` is not served here") }));
+    }
+    let answers: serde_json::Map<String, serde_json::Value> = modules
+        .iter()
+        .filter(|m| only.is_none_or(|n| n == m.name()))
+        .map(|m| {
+            let why = waiting(modules, bundles, Some(m.name()));
+            (m.name().to_owned(), json!({ "ready": why.is_empty(), "bundle": bundles.and_then(|b| b.version_of(m.name())), "waiting": why }))
+        })
+        .collect();
+    let why = waiting(modules, bundles, only);
+    let version = bundles.and_then(|b| match only {
+        Some(name) => b.version_of(name),
+        None => b.version(),
+    });
+    let status = if why.is_empty() { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    (status, json!({ "ready": why.is_empty(), "bundle": version, "waiting": why, "modules": answers }))
+}
+
 /// `/admin/api/modules`: the active modules, so the dashboard offers a tab for each.
 fn module_list(modules: &[Mounted]) -> serde_json::Value {
-    modules.iter().map(|m| json!({ "name": m.name(), "version": m.slot.version(), "unavailable": m.module.unavailable() })).collect()
+    modules.iter().map(|m| json!({ "name": m.name(), "version": m.description.version, "unavailable": m.module.unavailable() })).collect()
 }
 
 /// `/docs`: Swagger UI over the reference of geko and those of the modules.
@@ -300,6 +354,16 @@ fn response(r: module::Response) -> Response {
     response
 }
 
+/// Where the client reached geko, from the headers of the request: a client can send anything here,
+/// so what is not a plain host and port is no origin. Only that client reads what it makes of it.
+fn origin(headers: &HeaderMap) -> Option<String> {
+    let first = |name: &str| headers.get(name).and_then(|v| v.to_str().ok()).and_then(|v| v.split(',').next()).map(str::trim).filter(|v| !v.is_empty());
+    let host = first("x-forwarded-host").or_else(|| first("host"))?;
+    let plain = host.len() <= 255 && host.bytes().all(|b| b.is_ascii_alphanumeric() || b"-.:[]_".contains(&b));
+    let scheme = first("x-forwarded-proto").filter(|s| matches!(*s, "http" | "https")).unwrap_or("http");
+    plain.then(|| format!("{scheme}://{host}"))
+}
+
 /// The handler of one route of a module: the request as data, answered on the pool if the route
 /// asks for it.
 fn handler(module: Arc<dyn Module>, route: &module::Route) -> MethodRouter {
@@ -313,6 +377,7 @@ fn handler(module: Arc<dyn Module>, route: &module::Route) -> MethodRouter {
             content_type: headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).map(str::to_owned),
             body: body.to_vec(),
             waited_us: 0,
+            origin: origin(&headers),
         };
         if !pool {
             return response(module.handle(request));
@@ -403,23 +468,24 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
             let error = health_bundles.as_ref().and_then(|b| b.error());
             let unavailable: serde_json::Map<String, serde_json::Value> =
                 health_modules.iter().filter_map(|m| Some((m.name().to_owned(), m.module.unavailable()?.into()))).collect();
-            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error, "modules_unavailable": unavailable })) }
+            let part = |m: &Mounted| {
+                let (bundle, error) = health_bundles.as_ref().map_or((None, None), |b| (b.version_of(m.name()), b.error_of(m.name())));
+                (m.name().to_owned(), json!({ "bundle": bundle, "error": error }))
+            };
+            let parts: serde_json::Map<String, serde_json::Value> = health_modules.iter().map(part).collect();
+            async move { Json(json!({ "status": "ok", "modules": names, "bundle": version, "bundle_error": error, "bundles": parts, "modules_unavailable": unavailable })) }
         }),
     );
     // `/health` says the process is alive, from the start (the health check of the image, while it
     // builds); `/ready` says it can answer: the probe that keeps a pod of the operator mode out of
-    // the balancer until it has loaded its bundle.
+    // the balancer until it has loaded its bundle. `?module=` asks about that module alone, which
+    // is the one to look at when one balancer sends each module to the same server.
     let (ready_bundles, ready_modules) = (bundles.clone(), modules.to_vec());
     let health = health.route(
         "/ready",
-        get(move || {
-            let waiting: Vec<String> = match &ready_bundles {
-                Some(b) => b.waiting_for(),
-                None => ready_modules.iter().filter_map(|m| m.module.unavailable().map(|why| format!("{}: {why}", m.name()))).collect(),
-            };
-            let version = ready_bundles.as_ref().and_then(|b| b.version());
-            let status = if waiting.is_empty() { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
-            async move { (status, Json(json!({ "ready": status == StatusCode::OK, "bundle": version, "waiting": waiting }))) }
+        get(move |Query(query): Query<HashMap<String, String>>| {
+            let (status, body) = readiness(&ready_modules, ready_bundles.as_deref(), query.get("module").map(String::as_str));
+            async move { (status, Json(body)) }
         }),
     );
     let tracked = health.merge(module_routes(modules)).route_layer(axum::middleware::from_fn_with_state(Arc::clone(&metrics), metrics::track));
@@ -448,14 +514,8 @@ pub fn router(modules: &[Mounted], bundles: Option<Arc<BundleManager>>, access: 
 
 pub async fn serve(addr: SocketAddr, modules: Vec<Mounted>, bundles: Option<BundleSource>, access: Access, contact: Option<String>) -> Result<()> {
     let manager = bundles.map(|source| Arc::new(BundleManager::new(source, modules.clone())));
+    // In the background: it listens from the start, and each module answers once it has loaded.
     if let Some(m) = &manager {
-        let initial = Arc::clone(m);
-        match tokio::task::spawn_blocking(move || initial.refresh()).await {
-            Ok(Ok(true)) => {}
-            Ok(Ok(false)) => tracing::warn!("no bundle published yet (geko build, or the one geko up is running): serving 503 until one appears"),
-            Ok(Err(e)) => tracing::error!(error = %e, "cannot load the current bundle"),
-            Err(e) => tracing::error!(error = %e, "bundle load task failed"),
-        }
         Arc::clone(m).watch();
     }
     let app = router(&modules, manager, access, contact);
@@ -491,6 +551,26 @@ impl IntoResponse for ApiError {
 }
 
 #[cfg(test)]
+mod origin_tests {
+    use super::*;
+
+    fn headers(list: &[(&'static str, &'static str)]) -> HeaderMap {
+        list.iter().map(|(k, v)| (axum::http::HeaderName::from_static(k), axum::http::HeaderValue::from_static(v))).collect()
+    }
+
+    #[test]
+    fn the_origin_is_where_the_client_reached_geko() {
+        assert_eq!(origin(&headers(&[("host", "maps.example.com:8080")])).as_deref(), Some("http://maps.example.com:8080"));
+        let proxied = [("host", "geko:8080"), ("x-forwarded-host", "maps.example.com, proxy"), ("x-forwarded-proto", "https")];
+        assert_eq!(origin(&headers(&proxied)).as_deref(), Some("https://maps.example.com"));
+        assert_eq!(origin(&headers(&[("host", "[::1]:8080"), ("x-forwarded-proto", "gopher")])).as_deref(), Some("http://[::1]:8080"));
+        assert_eq!(origin(&headers(&[])), None);
+        assert_eq!(origin(&headers(&[("host", "evil.example/path?")])), None);
+        assert_eq!(origin(&headers(&[("host", "a b")])), None);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::{Body, to_bytes};
@@ -504,13 +584,18 @@ mod tests {
         loaded: Mutex<Vec<String>>,
         /// "1.0.0" when empty.
         version: &'static str,
+        /// "fake" when empty.
+        name: &'static str,
+        /// The bundle it says it cannot read.
+        rejects: &'static str,
+        attempts: Mutex<usize>,
     }
 
     impl Module for Fake {
         fn describe(&self) -> Description {
             let route = |method, path: &str, pool, public| Route { method, path: path.into(), pool, public };
             Description {
-                name: ModuleName::new("fake").unwrap(),
+                name: ModuleName::new(if self.name.is_empty() { "fake" } else { self.name }).unwrap(),
                 version: if self.version.is_empty() { "1.0.0" } else { self.version }.into(),
                 contract: module::CONTRACT,
                 routes: vec![
@@ -524,6 +609,10 @@ mod tests {
             }
         }
         fn load(&self, bundle: &BundleView) -> Result<()> {
+            *self.attempts.lock().unwrap() += 1;
+            if bundle.manifest.version == self.rejects {
+                return Err(geko_module_sdk::GekoError::Data("cannot read it".into()));
+            }
             self.loaded.lock().unwrap().push(format!("{} {}", bundle.manifest.version, bundle.module.meta["n"]));
             Ok(())
         }
@@ -612,7 +701,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mounted = Mounted::new(Arc::new(Fake::default()));
         let manager = Arc::new(BundleManager::new(
-            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: None },
+            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None },
             vec![mounted.clone()],
         ));
         let app = router(&[mounted], Some(Arc::clone(&manager)), Access { api_keys: vec!["k".into()], ..Default::default() }, None);
@@ -626,7 +715,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         BundleManifest { format: FORMAT, version: "v1".into(), created_unix: 0, modules: vec![], licenses: vec![], artifacts: vec![] }.write(&root).unwrap();
         std::fs::write(dir.path().join("current"), "v1").unwrap();
-        assert!(manager.refresh().unwrap());
+        assert!(!manager.refresh().unwrap(), "no module took it");
         let (status, body) = get_json(&app, "/ready").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["waiting"], json!(["the part of fake in the bundle"]));
@@ -656,10 +745,20 @@ mod tests {
 
     /// Publishes `version` with the part of the fake module built by its version `by`.
     fn publish_by(dir: &std::path::Path, version: &str, contract: u32, by: &str) {
+        publish_parts(dir, version, &[("fake", contract, by)]);
+    }
+
+    fn publish_parts(dir: &std::path::Path, version: &str, parts: &[(&str, u32, &str)]) {
         let root = dir.join(version);
         std::fs::create_dir_all(&root).unwrap();
-        let part = BundleModule { name: ModuleName::new("fake").unwrap(), version: by.into(), contract, meta: json!({ "n": version }) };
-        BundleManifest { format: FORMAT, version: version.into(), created_unix: 0, modules: vec![part], licenses: vec![], artifacts: vec![] }
+        let module = |(name, contract, by): &(&str, u32, &str)| BundleModule {
+            name: module::ModuleName::new(name).unwrap(),
+            version: (*by).into(),
+            contract: *contract,
+            meta: json!({ "n": version }),
+        };
+        let licenses = vec![LicenseNotice { source: version.into(), name: "ODbL".into(), attribution: "OSM".into(), url: None }];
+        BundleManifest { format: FORMAT, version: version.into(), created_unix: 0, modules: parts.iter().map(module).collect(), licenses, artifacts: vec![] }
             .write(&root)
             .unwrap();
         std::fs::write(dir.join("current"), version).unwrap();
@@ -678,7 +777,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(Fake::default());
         let manager = BundleManager::new(
-            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: None },
+            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None },
             vec![Mounted::new(fake.clone())],
         );
         assert!(!manager.refresh().unwrap(), "nothing published yet");
@@ -690,31 +789,86 @@ mod tests {
         assert_eq!(*fake.loaded.lock().unwrap(), [r#"v1 "v1""#, r#"v2 "v2""#]);
         assert_eq!(manager.version().as_deref(), Some("v2"));
         publish(dir.path(), "v3", module::CONTRACT + 1);
-        let err = manager.refresh().unwrap_err().to_string();
-        assert!(err.contains("contract"), "{err}");
+        assert!(!manager.refresh().unwrap(), "a part of another contract is not taken");
         assert_eq!(manager.version().as_deref(), Some("v2"), "the previous one stays");
         assert!(manager.error().is_some_and(|e| e.contains("contract")), "and /health says why");
     }
 
-    #[tokio::test]
-    async fn a_bundle_of_another_version_of_the_module_switches_to_it() {
+    #[test]
+    fn a_bundle_of_another_version_of_the_module_is_for_the_module_to_judge() {
         let dir = tempfile::tempdir().unwrap();
-        let newer = Arc::new(Fake { version: "2.0.0", ..Default::default() });
-        let given = Arc::clone(&newer);
-        let reopen: Reopen = Arc::new(move |name, version| {
-            assert_eq!((name.as_str(), version), ("fake", "2.0.0"));
-            Ok(Some(Arc::clone(&given) as Arc<dyn Module>))
-        });
-        let mounted = Mounted::new(Arc::new(Fake::default()));
-        let manager = Arc::new(BundleManager::new(
-            BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None, reopen: Some(reopen) },
-            vec![mounted.clone()],
-        ));
-        publish_by(dir.path(), "v1", module::CONTRACT, "2.0.0");
+        let fake = Arc::new(Fake::default());
+        let manager = BundleManager::new(BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None }, vec![Mounted::new(fake.clone())]);
+        publish_by(dir.path(), "v1", module::CONTRACT, "0.9.0");
         assert!(manager.refresh().unwrap());
-        assert_eq!(*newer.loaded.lock().unwrap(), [r#"v1 "v1""#], "the new version loaded the bundle");
-        assert_eq!(mounted.module.describe().version, "2.0.0");
-        let app = router(&[mounted], Some(manager), Access::default(), None);
-        assert_eq!(get_json(&app, "/fake/v1/echo/x").await.0, StatusCode::OK, "and serves its routes");
+        assert_eq!(*fake.loaded.lock().unwrap(), [r#"v1 "v1""#]);
+        assert_eq!(manager.error(), None);
+    }
+
+    fn two_modules(dir: &std::path::Path, rejects: &'static str) -> (Arc<Fake>, Arc<Fake>, Vec<Mounted>, Arc<BundleManager>) {
+        let good = Arc::new(Fake { name: "good", ..Default::default() });
+        let bad = Arc::new(Fake { name: "bad", rejects, ..Default::default() });
+        let mounted = vec![Mounted::new(bad.clone()), Mounted::new(good.clone())];
+        let source = BundleSource { dir: dir.to_path_buf(), reload: Duration::from_secs(1), pull: None };
+        let manager = Arc::new(BundleManager::new(source, mounted.clone()));
+        (good, bad, mounted, manager)
+    }
+
+    const BOTH: [(&str, u32, &str); 2] = [("bad", module::CONTRACT, "1.0.0"), ("good", module::CONTRACT, "1.0.0")];
+
+    #[tokio::test]
+    async fn a_module_that_rejects_a_bundle_holds_back_no_other() {
+        let dir = tempfile::tempdir().unwrap();
+        let (good, bad, mounted, manager) = two_modules(dir.path(), "v2");
+        publish_parts(dir.path(), "v1", &BOTH);
+        assert!(manager.refresh().unwrap());
+        publish_parts(dir.path(), "v2", &BOTH);
+        assert!(manager.refresh().unwrap(), "one of them took it");
+        assert_eq!(*good.loaded.lock().unwrap(), [r#"v1 "v1""#, r#"v2 "v2""#]);
+        assert_eq!(manager.version_of("good").as_deref(), Some("v2"));
+        assert_eq!(manager.version_of("bad").as_deref(), Some("v1"), "it goes on with the one it had");
+        assert_eq!(manager.version().as_deref(), Some("v2"));
+
+        let app = router(&mounted, Some(Arc::clone(&manager)), Access::default(), None);
+        let (status, body) = get_json(&app, "/ready").await;
+        assert_eq!((status, &body["modules"]["bad"]["bundle"]), (StatusCode::OK, &json!("v1")), "it still serves");
+        let (_, body) = get_json(&app, "/health").await;
+        assert_eq!(body["bundles"]["good"], json!({ "bundle": "v2", "error": null }));
+        assert_eq!(body["bundles"]["bad"]["bundle"], json!("v1"));
+        assert!(body["bundles"]["bad"]["error"].as_str().unwrap().contains("cannot read it"), "{body}");
+        assert!(body["bundle_error"].as_str().unwrap().starts_with("bad: "), "{body}");
+        let sources = get_json(&app, "/v1/attribution").await.1;
+        assert_eq!(sources["bundles"], json!({ "bad": "v1", "good": "v2" }));
+        let named: Vec<&str> = sources["sources"].as_array().unwrap().iter().map(|s| s["source"].as_str().unwrap()).collect();
+        assert_eq!(named, ["v1", "v2"], "the licenses of what each module serves");
+
+        let attempts = *bad.attempts.lock().unwrap();
+        for _ in 0..3 {
+            assert!(!manager.refresh().unwrap());
+        }
+        assert_eq!(*bad.attempts.lock().unwrap(), attempts, "a rejected bundle is not tried again");
+        assert_eq!(good.loaded.lock().unwrap().len(), 2, "nor one already loaded");
+
+        publish_parts(dir.path(), "v3", &BOTH);
+        assert!(manager.refresh().unwrap());
+        assert_eq!((manager.version_of("bad").as_deref(), manager.error()), (Some("v3"), None), "the next one is tried");
+    }
+
+    #[tokio::test]
+    async fn a_module_with_nothing_to_serve_does_not_stop_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_, _, mounted, manager) = two_modules(dir.path(), "v1");
+        publish_parts(dir.path(), "v1", &BOTH);
+        assert!(manager.refresh().unwrap());
+        let app = router(&mounted, Some(manager), Access::default(), None);
+
+        let (status, body) = get_json(&app, "/ready").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "not all of it can answer");
+        assert!(body["waiting"][0].as_str().unwrap().starts_with("bad: "), "{body}");
+        assert_eq!(body["modules"]["good"]["ready"], json!(true));
+        let (status, body) = get_json(&app, "/ready?module=good").await;
+        assert_eq!((status, &body["bundle"]), (StatusCode::OK, &json!("v1")));
+        assert_eq!(get_json(&app, "/ready?module=bad").await.0, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(get_json(&app, "/ready?module=other").await.0, StatusCode::NOT_FOUND);
     }
 }

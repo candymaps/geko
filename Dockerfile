@@ -1,13 +1,13 @@
-# geko in a container: the binary, with no configuration and no module: geko downloads the modules
-# of its configuration and they download their data (PROJECT.md §7.1). Mount your own geko.toml at
+# geko in a container: the binary and the modules of modules.lock, with no configuration: the modules
+# that it turns on download their data (PROJECT.md §7.1). Mount your own geko.toml at
 # /etc/geko/geko.toml and a volume at /var/lib/geko, where the downloads, the work files and the
 # published bundles live:
 #
 #   docker build -t geko .
 #   docker run -p 8080:8080 -v geko-data:/var/lib/geko -v ./geko.toml:/etc/geko/geko.toml geko
 #
-# geko comes alone, without modules: it downloads those of [modules] into /var/lib/geko/modules
-# (the newest of its contract, or the fixed version), signed (docs/MODULES_PLAN.md).
+# Every module comes in the image, as the same signed package that was checked with this geko
+# (docs/MODULE_UPDATES_PLAN.md), and only those of [modules] are loaded.
 #
 # The default command is `up`: serve at once (503 until the first bundle is published) while it
 # downloads and builds what the configuration asks for, and build again every [data] max_age_days,
@@ -15,7 +15,7 @@
 # machine published.
 #
 # The target `local` (develop/compose.yaml, `make start-dev`) is for development instead: geko and the
-# modules of MODULES, built from their repositories (the build contexts `geocoder` and `tiles`)
+# modules of MODULES, built from their repositories (the build contexts `geocoder`, `tiles` and `router`)
 # against the SDK of this tree, in the image, so that it never downloads one.
 
 # The dashboard (ui/), which geko embeds: compiled here, in the Node of its package-lock.json.
@@ -39,10 +39,25 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM scratch AS binary
 COPY --from=build /out/geko /geko
 
+# The packages of modules.lock, by their digest and with their signature checked.
+FROM rust:1.99.0-bookworm AS modules
+ARG ORAS_VERSION=1.2.2
+# From oras_<version>_checksums.txt of that release, for linux_amd64.
+ARG ORAS_SHA256=bff970346470e5ef888e9f2c0bf7f8ee47283f5a45207d6e7a037da1fb0eae0d
+RUN curl -fsSL -o /tmp/oras.tar.gz "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_amd64.tar.gz" \
+    && echo "$ORAS_SHA256  /tmp/oras.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/oras.tar.gz -C /usr/local/bin oras && rm /tmp/oras.tar.gz
+WORKDIR /src
+COPY . .
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=geko-target-modules,target=/src/target \
+    bash ci/modules.sh pull /out
+
 # The repositories of the modules, given as build contexts of the same name (develop/compose.yaml);
 # empty without them.
 FROM scratch AS geocoder
 FROM scratch AS tiles
+FROM scratch AS router
 # The Planetiler profile of the tiles module (protomaps-basemap.jar and styles/, from its ci/profile.sh),
 # given as the build context tiles-profile by `make start-dev`; empty without it.
 FROM scratch AS tiles-profile
@@ -66,6 +81,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,id=geko-target-local,target=/src/target \
     --mount=type=bind,from=geocoder,target=/modules/geocoder \
     --mount=type=bind,from=tiles,target=/modules/tiles \
+    --mount=type=bind,from=router,target=/modules/router \
     --mount=type=bind,from=tiles-profile,target=/profile/tiles \
     set -e; \
     [ -n "$GEKO_MODULE_VERSION" ] || unset GEKO_MODULE_VERSION; \
@@ -125,6 +141,8 @@ LABEL org.opencontainers.image.revision=$REVISION
 # geko (that of Cargo.toml) and its commit are given by `make image` and the image workflow, last,
 # so that a new version does not rebuild the layers above.
 FROM base
+COPY --from=modules /out /usr/lib/geko/modules
+ENV GEKO_MODULES=/usr/lib/geko/modules
 COPY --from=binary /geko /usr/local/bin/geko
 ARG VERSION=unknown
 ARG REVISION=unknown

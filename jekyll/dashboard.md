@@ -32,6 +32,12 @@ zooms out freely.
 The search of the geocoder (autocomplete, search, reverse geocoding, focus pin) appears only if the
 `geocoder` module is active.
 
+With the `router` module active and its graph loaded, **Directions** turns the clicks of the map into a
+route: the first click is the start, the next the end, and another starts over. It draws the fastest
+route and up to two alternatives, says the time and the length of each, and both ends can be dragged.
+While it is on, a click does not reverse geocode. Turned on with the roads of the scope out of sight, the
+map goes to them.
+
 ## The tab of a module
 
 Each active module has its own tab, which reads the status and the statistics the module serves.
@@ -40,10 +46,11 @@ Each active module has its own tab, which reads the status and the statistics th
 |---|---|
 | [Geocoder]({% link geocoder.md %}) | Overview, Sources, Performance, Query debugger, Configuration |
 | [Tiles]({% link tiles.md %}) | Overview, Sources, Performance, Styles, Configuration |
+| [Router]({% link router.md %}) | Overview, Sources, Performance, Configuration |
 
 ### Performance
 
-The performance section of both modules shows, since the module started and for the last hour minute by
+The performance section of the geocoder and tiles shows (the router has the same charts and the latency table, in µs and ms), since the module started and for the last hour minute by
 minute:
 
 | Card | Geocoder | Tiles |

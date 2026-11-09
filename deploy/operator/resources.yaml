@@ -141,8 +141,6 @@ spec:
             - "operator"
             - "--listen"
             - "0.0.0.0:8080"
-            - "--image-prefix"
-            - "ghcr.io/candymaps/geko-"
             - "--tag"
             - "latest"
             - "--storage"

@@ -90,7 +90,7 @@ up: install ## Serve, and build in the background what the configuration asks fo
 data: install ## Download and build what the configuration asks for
 	$(GEKO) build
 
-image: ui/dist/index.html ## Docker image IMAGE with geko alone, from a local release build (docker build compiles it instead): it downloads its modules
+image: ui/dist/index.html ## Docker image IMAGE with geko, from a local release build (docker build compiles it instead), and the modules of modules.lock
 	cargo build --release -p geko-app
 	@$(call glibc,$(BIN))
 	rm -rf $(CARGO_TARGET_DIR)/image && mkdir -p $(CARGO_TARGET_DIR)/image

@@ -21,9 +21,28 @@ export interface Status {
     center: [number, number, number] | null;
     layers: string[];
   } | null;
-  styles: { flavors: string[]; languages: number; fonts: string[]; sprites: number } | null;
+  styles: { flavors: string[]; languages: number; fonts: string[]; sprites: number; custom?: string[]; editable?: boolean } | null;
   sources: { id: string; name: string; attribution: string; url: string | null }[] | null;
   settings: { key: string; value: unknown; default: unknown; apply: "live" | "restart" | "rebuild" }[];
+}
+
+/** Reads a style to edit it: what the module adds when it serves one is taken out again, so that it is not saved with the bundle of today. */
+export async function readStyle(path: string): Promise<string> {
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path} answered ${res.status}`);
+  const style = await res.json();
+  delete style.sources?.protomaps;
+  if (typeof style.glyphs === "string" && style.glyphs.includes("/tiles/fonts/")) delete style.glyphs;
+  if (typeof style.sprite === "string" && style.sprite.includes("/tiles/sprites/")) style.sprite = style.sprite.split("?")[0];
+  return JSON.stringify(style, null, 2);
+}
+
+/** Saves or deletes a style of the user; the error is what the module says of it. */
+export async function postStyle(name: string, action: "save" | "delete", body = ""): Promise<void> {
+  const res = await fetch(`/tiles/styles/custom/${encodeURIComponent(name)}/${action}`, { method: "POST", headers: { "content-type": "application/json" }, body });
+  if (res.ok) return;
+  const answer = await res.json().catch(() => null);
+  throw new Error(answer?.error ?? `the module answered ${res.status}`);
 }
 
 export interface RouteStats {

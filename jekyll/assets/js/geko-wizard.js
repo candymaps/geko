@@ -12,8 +12,7 @@
   const DEFAULTS = {
     namespace: "geko",
     tag: "latest",
-    imagePrefix: "ghcr.io/candymaps/geko-",
-    operatorImage: "",
+    image: "",
     storage: "20Gi",
     storageClass: "",
     accessMode: "ReadWriteMany",
@@ -52,8 +51,9 @@
     const o = { ...DEFAULTS, ...options };
     const labels = { "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator", "app.kubernetes.io/part-of": "geko" };
     const selector = { "app.kubernetes.io/name": "geko", "app.kubernetes.io/component": "operator" };
-    const args = ["operator", "--listen", `0.0.0.0:${PORT}`, "--image-prefix", o.imagePrefix, "--tag", o.tag, "--storage", o.storage, "--access-mode", o.accessMode];
+    const args = ["operator", "--listen", `0.0.0.0:${PORT}`, "--tag", o.tag, "--storage", o.storage, "--access-mode", o.accessMode];
     if (o.storageClass) args.push("--storage-class", o.storageClass);
+    if (o.image) args.push("--image", o.image);
     if (o.host) args.push("--host", o.host);
     const manage = ["get", "list", "watch", "create", "patch", "delete"];
     const resources = [
@@ -94,7 +94,7 @@
               containers: [
                 {
                   name: "geko",
-                  image: o.operatorImage || `ghcr.io/candymaps/geko:${o.tag}`,
+                  image: o.image || `ghcr.io/candymaps/geko:${o.tag}`,
                   args,
                   ports: [{ name: "http", containerPort: PORT }],
                   volumeMounts: [{ name: "config", mountPath: "/etc/geko", readOnly: true }],
@@ -189,8 +189,8 @@
       "- `operator.yaml`: the operator, as `geko k8s install` writes it. Never edited: write it again with another `--tag` to update.",
       "- `geko-provisioning/`: the configuration the operator reads. Edit it and apply again: the operator makes the cluster what it says.",
       "",
-      `The images are \`${o.operatorImage || "ghcr.io/candymaps/geko:" + o.tag}\` (the operator) and \`${o.imagePrefix}<module>:${o.tag}\` (each module).`,
-      "If the registry is private, the cluster needs the credentials to pull them: the manifests do not carry an `imagePullSecret`.",
+      `The image is \`${o.image || "ghcr.io/candymaps/geko:" + o.tag}\`, for the operator and for every module.`,
+      "If the registry is private, the cluster needs the credentials to pull it: the manifests do not carry an `imagePullSecret`.",
       "",
     ].join("\n");
   }
@@ -257,7 +257,6 @@
   const LABEL = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
   const HOST = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$/;
   const TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
-  const PREFIX = /^[a-z0-9][a-z0-9._:/-]*[-/_.]$/;
   const IMAGE = /^[a-z0-9][a-z0-9._:/-]*$/;
   const REGION = /^[A-Z]{2}-[A-Z0-9]{1,3}$/;
 
@@ -266,8 +265,7 @@
     const errors = [];
     if (!LABEL.test(o.namespace)) errors.push("The namespace is a lowercase name, such as geko.");
     if (!TAG.test(o.tag)) errors.push("The version is a tag, such as 0.2.0.");
-    if (!PREFIX.test(o.imagePrefix)) errors.push("The image prefix ends where the module name goes, such as ghcr.io/candymaps/geko-.");
-    if (o.operatorImage && !IMAGE.test(o.operatorImage)) errors.push("The image of the operator is not an image name.");
+    if (o.image && !IMAGE.test(o.image)) errors.push("The image is not an image name.");
     if (!QUANTITY.test(o.storage)) errors.push("The size of the volume is a quantity, such as 20Gi.");
     if (o.host && !HOST.test(o.host)) errors.push("The host is a domain name, such as geko.example.org.");
     if (!o.modules.some((m) => m.enabled)) errors.push("Choose at least one module.");

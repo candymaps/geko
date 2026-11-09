@@ -466,6 +466,89 @@ main {
   text-decoration: underline;
   cursor: pointer;
 }
+.route-panel {
+  position: absolute;
+  z-index: 1;
+  top: 12px;
+  right: 12px;
+  width: 220px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font-size: 13px;
+}
+.route-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.route-toggle:hover,
+.route-toggle.on {
+  background: var(--hover);
+}
+.route-body {
+  padding: 4px 12px 8px;
+  border-top: 1px solid var(--border);
+}
+.route-body p {
+  margin: 6px 0;
+  color: var(--muted);
+}
+.route-body .route-error {
+  color: #d64545;
+}
+.route-body .route-note {
+  font-size: 12px;
+}
+.route-body ul {
+  margin: 6px 0;
+  padding: 0;
+  list-style: none;
+}
+.route-body li button {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.route-body li button:hover,
+.route-body li button.on {
+  background: var(--hover);
+}
+.route-body small {
+  color: var(--muted);
+}
+.route-body .link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+@media (max-width: 767px) {
+  .route-panel {
+    top: auto;
+    right: auto;
+    bottom: 12px;
+    left: 12px;
+  }
+}
 .dot-pin {
   width: 12px;
   height: 12px;
@@ -1219,4 +1302,53 @@ main {
   background: var(--bg);
   color: var(--ink);
   cursor: pointer;
+}
+
+button.gc-chip {
+  cursor: pointer;
+  font: inherit;
+}
+button.gc-chip:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.gc-editor {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.gc-editor input,
+.gc-editor textarea {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  font: 12px/1.5 ui-monospace, monospace;
+  padding: 8px;
+  width: 100%;
+}
+.gc-editor input {
+  max-width: 280px;
+}
+.gc-editor-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.gc-editor-actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 14px;
+}
+.gc-editor-actions button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.gc-editor-error {
+  color: #c0392b;
 }

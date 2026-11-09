@@ -1,0 +1,53 @@
+# Keeps modules.lock on the newest release of each module (docs/MODULE_UPDATES_PLAN.md): once a day,
+# or by hand, ci/modules.sh update on dev and, if it raised a version, a pull request to dev, which
+# modules.yml checks. It only proposes: merging it, and later dev into main, is what publishes.
+#
+# Needs the secret GEKO_MODULES_PR_TOKEN, with write access to the contents and the pull requests of
+# this repository: GitHub runs no workflow on a pull request opened with its own token, and this one
+# must run modules.yml. Without the secret it says so and does nothing.
+name: modules-update
+
+on:
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: modules-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    if: github.repository == 'candymaps/geko'
+    runs-on: ubuntu-latest
+    env:
+      TOKEN: ${{ secrets.GEKO_MODULES_PR_TOKEN }}
+    steps:
+      - if: env.TOKEN == ''
+        run: |
+          echo "::notice::the secret GEKO_MODULES_PR_TOKEN is not set, so modules.lock is not updated"
+      - if: env.TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          token: ${{ secrets.GEKO_MODULES_PR_TOKEN }}
+      - if: env.TOKEN != ''
+        uses: oras-project/setup-oras@v1
+      - if: env.TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.GEKO_MODULES_PR_TOKEN }}
+        run: |
+          ci/modules.sh update
+          git diff --quiet -- modules.lock && exit 0
+          branch=feature/update-modules
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git commit -am "build: update the modules of modules.lock"
+          git push --force origin "$branch"
+          gh pr view "$branch" --json state --jq .state | grep -q OPEN \
+            || gh pr create --base dev --head "$branch" --title "build: update the modules of modules.lock" \
+              --body "The newest releases of the modules, from \`ci/modules.sh update\`."

@@ -1,8 +1,10 @@
 import { Activity, Database, Layers, Palette, Settings2 } from "lucide-preact";
+import { useEffect, useState } from "preact/hooks";
 import { useTab } from "../hooks";
 import { useApi } from "../api";
 import { Bars, BuildSteps, Card, number, Placeholder, SettingsCard, size, Spark, Stat, Tabs, type Setting, type Tab } from "../panel";
-import { combine, type Stats, type Status } from "./api";
+import { combine, postStyle, readStyle, type Stats, type Status } from "./api";
+import { useSource } from "../source";
 import { inRange, NoPods, PodFilter, podSeries, RangeSelect, stepOf, usePodView, usePods, useRange } from "../pods";
 
 const TABS: Tab[] = [
@@ -245,6 +247,82 @@ function Performance() {
   );
 }
 
+const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/** The styles of the user: JSON of MapLibre, saved by the module outside the bundle, so a change needs no build. */
+function CustomStyles({ status }: { status: Status }) {
+  const { mode } = useSource();
+  const s = status.styles;
+  const saved = s?.custom ?? [];
+  const [names, setNames] = useState(saved);
+  const [name, setName] = useState("");
+  const [text, setText] = useState("");
+  const [note, setNote] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setNames(saved), [saved.join()]);
+  const live = mode === "live";
+  const editable = live && s?.editable === true;
+  const run = async (work: () => Promise<string>) => {
+    setBusy(true);
+    try {
+      setNote({ ok: true, text: await work() });
+    } catch (e) {
+      setNote({ ok: false, text: (e as Error).message });
+    }
+    setBusy(false);
+  };
+  const open = (path: string, as: string) =>
+    run(async () => {
+      setText(await readStyle(path));
+      setName(as);
+      return as ? `Editing ${as}.` : "A copy: name it to save it.";
+    });
+  const save = () =>
+    run(async () => {
+      await postStyle(name, "save", text);
+      setNames((n) => (n.includes(name) ? n : [...n, name].sort()));
+      return `Saved. Maps load it from /tiles/styles/custom/${name}.json`;
+    });
+  const remove = () =>
+    run(async () => {
+      await postStyle(name, "delete");
+      setNames((n) => n.filter((x) => x !== name));
+      setName("");
+      setText("");
+      return "Deleted.";
+    });
+  return (
+    <Card title="Your styles" wide aside={`${names.length} saved`}>
+      {!editable && <p class="gc-scope">{live ? "Read only: set editable = true under [styles] in geko-tiles.toml, with API keys in geko.toml." : "Saving needs a running geko."}</p>}
+      <div class="gc-chips">
+        {names.map((n) => (
+          <button key={n} type="button" class="gc-chip" disabled={busy || !live} onClick={() => open(`/tiles/styles/custom/${n}.json`, n)}>
+            {n}
+          </button>
+        ))}
+        {(s?.flavors ?? []).map((f) => (
+          <button key={f} type="button" class="gc-chip" disabled={busy || !live} onClick={() => open(`/tiles/styles/${f}/en.json`, "")}>
+            Copy {f}
+          </button>
+        ))}
+      </div>
+      <div class="gc-editor">
+        <input aria-label="Name of the style" placeholder="name" value={name} spellcheck={false} onInput={(e) => setName(e.currentTarget.value)} />
+        <textarea aria-label="Style JSON" rows={18} spellcheck={false} value={text} onInput={(e) => setText(e.currentTarget.value)} />
+        <div class="gc-editor-actions">
+          <button type="button" disabled={busy || !editable || !NAME.test(name) || text === ""} onClick={save}>
+            Save
+          </button>
+          <button type="button" disabled={busy || !editable || !names.includes(name)} onClick={remove}>
+            Delete
+          </button>
+          {note && <span class={note.ok ? "muted" : "gc-editor-error"}>{note.text}</span>}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function Styles({ status }: { status: Status }) {
   const { pods } = usePods<Stats>("tiles", "tiles/stats.json", 30_000);
   const answered = (pods ?? []).flatMap((p) => (p.data ? [p.data] : []));
@@ -277,6 +355,7 @@ function Styles({ status }: { status: Status }) {
           <Stat label="TileJSON" value="/tiles/tilejson.json" />
         </div>
       </Card>
+      <CustomStyles status={status} />
     </div>
   );
 }
@@ -289,6 +368,7 @@ const HELP: Record<string, string> = {
   "planetiler.threads": "0 is one per core.",
   "planetiler.storage": "Where Planetiler keeps its temporary data: mmap or ram.",
   "planetiler.qrank": "Download QRank to order places and POIs.",
+  "styles.editable": "Accept saving and deleting styles over HTTP: turn it on only with API keys.",
 };
 
 function settingsOf(status: Status): Setting[] {

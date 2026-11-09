@@ -82,14 +82,31 @@ paths:
                 properties:
                   status: { type: string, const: ok }
                   modules: { type: array, items: { type: string, enum: [geocoder, tiles] } }
-                  bundle: { type: [string, "null"], description: Version of the bundle served; null before the first one is published. }
+                  bundle: { type: [string, "null"], description: Newest version that some module serves; null before the first one is loaded. }
+                  bundle_error: { type: [string, "null"], description: Why the last bundle could not be read, or why each module that rejected it did. }
+                  bundles:
+                    type: object
+                    description: By module, the version it serves and why it rejected the last one, if it did.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        bundle: { type: [string, "null"] }
+                        error: { type: [string, "null"] }
   /ready:
     get:
       summary: Readiness. Whether this server can answer, once it has loaded its bundle. Never needs an API key.
       description: |
-        `/health` says the process is alive, from the start; `/ready` says it can answer: a bundle is
-        loaded, it has the part of every module served here, and none of them says it is unavailable.
-        The probe that keeps a pod out of the balancer until then (docs/OPERATOR_MODE_PLAN.md).
+        `/health` says the process is alive, from the start; `/ready` says it can answer: every module
+        served here has loaded its part of a bundle, and none of them says it is unavailable. A module
+        that rejects a new bundle goes on with the one it had, and is still ready. The probe that keeps
+        a pod out of the balancer until then (docs/OPERATOR_MODE_PLAN.md). Each module serves as soon as
+        it is ready, whatever the others do: `module` asks about one alone.
+      parameters:
+        - name: module
+          in: query
+          required: false
+          description: Answer only about this module.
+          schema: { type: string }
       responses:
         "200":
           description: Ready.
@@ -101,6 +118,8 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Ready" }
+        "404":
+          description: "`module` is not served here."
   /metrics:
     get:
       summary: Metrics in the Prometheus text format.
@@ -126,3 +145,12 @@ components:
           type: array
           items: { type: string }
           description: What it waits for; empty when ready.
+        modules:
+          type: object
+          description: The same, by module.
+          additionalProperties:
+            type: object
+            properties:
+              ready: { type: boolean }
+              bundle: { type: [string, "null"] }
+              waiting: { type: array, items: { type: string } }

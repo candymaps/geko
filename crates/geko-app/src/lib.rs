@@ -22,7 +22,7 @@ use geko_module_sdk::module::{Module, ModuleName};
 
 use crate::config::{Config, DeployMode};
 pub use crate::modules::Linked;
-use crate::modules::{Opened, Opener, Origin};
+use crate::modules::{Opened, Opener};
 
 #[derive(Parser)]
 #[command(name = "geko", version, about = "Geocoder and vector tile server")]
@@ -113,12 +113,10 @@ enum Command {
 /// What decides the manifests of the operator mode besides the configuration.
 #[derive(clap::Args, Clone)]
 struct ManifestArgs {
-    /// The image of a module is this prefix followed by its name.
-    #[arg(long, default_value = "ghcr.io/candymaps/geko-")]
-    image_prefix: String,
     #[arg(long, default_value = "latest")]
     tag: String,
-    /// One image for every module (the one of `make start-dev`), instead of the prefix and the tag.
+    /// The image of the operator and of every module, which has them all; by default
+    /// `ghcr.io/candymaps/geko:<tag>`.
     #[arg(long)]
     image: Option<String>,
     /// Size of the volume of bundles and downloads, which every module shares.
@@ -138,7 +136,6 @@ struct ManifestArgs {
 impl ManifestArgs {
     fn options(&self) -> k8s::Options {
         k8s::Options {
-            image_prefix: self.image_prefix.clone(),
             tag: self.tag.clone(),
             image: self.image.clone(),
             storage: self.storage.clone(),
@@ -164,10 +161,6 @@ enum K8s {
     Install {
         #[command(flatten)]
         manifests: ManifestArgs,
-        /// The image that runs the operator; by default `ghcr.io/candymaps/geko:<tag>`, the one
-        /// with no module in it.
-        #[arg(long)]
-        operator_image: Option<String>,
     },
 }
 
@@ -188,14 +181,8 @@ enum Purge {
     Modules,
 }
 
-fn serve(config: &Config, opener: &Arc<Opener>, opened: &[Opened], listen: Option<SocketAddr>) -> anyhow::Result<()> {
+fn serve(config: &Config, opened: &[Opened], listen: Option<SocketAddr>) -> anyhow::Result<()> {
     let mounted = opened.iter().map(|o| geko_server::Mounted::new(Arc::clone(&o.module))).collect();
-    let origins: Vec<(ModuleName, Origin)> = opened.iter().map(|o| (o.module.describe().name, o.origin.clone())).collect();
-    let reopener = Arc::clone(opener);
-    let reopen: geko_server::Reopen = Arc::new(move |name, version| {
-        let Some((_, origin)) = origins.iter().find(|(n, _)| n == name) else { return Ok(None) };
-        reopener.reopen(name, version, origin)
-    });
     // Before each look for a new version the server asks its store to bring it: nothing for a
     // directory (the build writes where the server reads), a pull for a mirror.
     let store = bundle_store::open(config);
@@ -212,7 +199,6 @@ fn serve(config: &Config, opener: &Arc<Opener>, opened: &[Opened], listen: Optio
         dir: store.dir().to_owned(),
         reload: std::time::Duration::from_secs(config.serve.reload_secs.max(1)),
         pull: Some(pull),
-        reopen: Some(reopen),
     };
     let addr = listen.unwrap_or(config.serve.listen);
     let contact = Some(config.serve.attribution_contact.clone()).filter(|c| !c.is_empty());
@@ -327,9 +313,8 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             print!("{}", k8s::render(&config, &manifests.options()));
             return Ok(());
         }
-        Command::K8s { what: K8s::Install { manifests, operator_image } } => {
-            let image = operator_image.clone().unwrap_or_else(|| format!("ghcr.io/candymaps/geko:{}", manifests.tag));
-            print!("{}", k8s::install(&manifests.options(), &image));
+        Command::K8s { what: K8s::Install { manifests } } => {
+            print!("{}", k8s::install(&manifests.options()));
             return Ok(());
         }
         Command::Operator { manifests, listen, namespace } => {
@@ -342,7 +327,6 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     if std::env::var_os("GEKO_MODULES").is_some() {
         opener = opener.without_downloads();
     }
-    let opener = Arc::new(opener);
     let opened = active.iter().map(|name| opener.open(name)).collect::<geko_module_sdk::Result<Vec<_>>>()?;
     let modules: Vec<Arc<dyn Module>> = opened.iter().map(|o| Arc::clone(&o.module)).collect();
     // Naming the modules (`--module geocoder`) is building some of them: the bundle keeps the part
@@ -374,7 +358,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             }
             print!("{}", run::build(&config, &modules, force, refresh, keep_others)?);
         }
-        Command::Serve { listen } => serve(&config, &opener, &opened, listen)?,
+        Command::Serve { listen } => serve(&config, &opened, listen)?,
         Command::Up { force, purge: first_purge, refresh, listen } => {
             prepare(&modules)?;
             if first_purge {
@@ -386,7 +370,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             }
             let (builder, background) = (config.clone(), modules.clone());
             std::thread::Builder::new().name("geko-build".into()).spawn(move || run::regenerate(&builder, &background, force, refresh, keep_others))?;
-            serve(&config, &opener, &opened, listen)?;
+            serve(&config, &opened, listen)?;
         }
         Command::Purge { what } => {
             if matches!(what, None | Some(Purge::Data)) {

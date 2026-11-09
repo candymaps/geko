@@ -186,14 +186,14 @@ fn stale(existing: &[Object], desired: &[Value]) -> Vec<Object> {
 }
 
 /// What the dashboard shows of each active module: the version its image says, and why it answers
-/// nothing if no pod is ready.
+/// nothing if no pod is ready, or that those that are ready serve an older bundle.
 fn statuses(modules: &[ModuleName], deployed: &[Deployed], builds: &[Build], jobs: &[JobState]) -> Vec<ModuleStatus> {
     modules
         .iter()
         .map(|module| {
             let name = module.to_string();
             let Some(d) = deployed.iter().find(|d| d.name == format!("geko-{name}")) else {
-                return ModuleStatus { name, version: String::new(), unavailable: Some("not created yet".into()) };
+                return ModuleStatus { name, version: String::new(), unavailable: Some("not created yet".into()), warning: None };
             };
             let version = d.image.as_deref().and_then(tag).unwrap_or_default().to_owned();
             let job = builds.iter().find(|b| b.module == *module).and_then(|b| jobs.iter().find(|j| j.name == b.job));
@@ -202,7 +202,8 @@ fn statuses(modules: &[ModuleName], deployed: &[Deployed], builds: &[Build], job
                 Some(j) if !j.succeeded => format!("building its bundle; no pod ready (0/{})", d.replicas),
                 _ => format!("no pod ready (0/{})", d.replicas),
             });
-            ModuleStatus { name, version, unavailable }
+            let warning = (d.ready > 0 && job.is_some_and(|j| j.failed)).then(|| "its last build failed; it serves the previous bundle".to_owned());
+            ModuleStatus { name, version, unavailable, warning }
         })
         .collect()
 }
@@ -295,7 +296,6 @@ mod tests {
 
     fn options() -> k8s::Options {
         k8s::Options {
-            image_prefix: "ghcr.io/candymaps/geko-".into(),
             tag: "latest".into(),
             image: None,
             storage: "20Gi".into(),
@@ -358,8 +358,8 @@ geocoder = true
         let modules: Vec<ModuleName> = ["geocoder", "tiles", "extra"].iter().map(|m| m.parse().unwrap()).collect();
         let cluster = [deployed("geko-geocoder", "ghcr.io/candymaps/geko-geocoder:1.2.0", 3, 2), deployed("geko-tiles", "localhost:5000/geko-tiles", 1, 0)];
         let shown = statuses(&modules, &cluster, &[], &[]);
-        assert_eq!(shown[0], ModuleStatus { name: "geocoder".into(), version: "1.2.0".into(), unavailable: None });
-        assert_eq!(shown[1], ModuleStatus { name: "tiles".into(), version: String::new(), unavailable: Some("no pod ready (0/1)".into()) });
+        assert_eq!(shown[0], ModuleStatus { name: "geocoder".into(), version: "1.2.0".into(), unavailable: None, warning: None });
+        assert_eq!(shown[1], ModuleStatus { name: "tiles".into(), version: String::new(), unavailable: Some("no pod ready (0/1)".into()), warning: None });
         assert_eq!(shown[2].unavailable.as_deref(), Some("not created yet"));
     }
 
@@ -415,6 +415,19 @@ geocoder = true
         assert_eq!(job["metadata"]["labels"][MANAGED_LABEL], json!(OPERATOR), "it is the operator's, so that it can delete it");
         assert_eq!(job["metadata"]["labels"][BUILD_HASH], json!("1234abcd"));
         assert_eq!(job["spec"]["template"]["spec"]["containers"][0]["args"], json!(["build", "--module", "geocoder"]));
+    }
+
+    #[test]
+    fn the_dashboard_warns_of_a_failed_build_while_the_pods_serve_the_previous_bundle() {
+        let modules = [module("geocoder")];
+        let wanted = builds(&modules, &data("[modules]\ngeocoder = true\n", &[])).unwrap();
+        let job = |failed: bool| [JobState { name: wanted[0].job.clone(), succeeded: !failed, failed }];
+        let shown = |ready, failed| statuses(&modules, &[deployed("geko-geocoder", "geko:dev", 1, ready)], &wanted, &job(failed))[0].clone();
+        assert_eq!(shown(1, false).warning, None);
+        let serving = shown(1, true);
+        assert_eq!(serving.unavailable, None, "it still answers");
+        assert_eq!(serving.warning.as_deref(), Some("its last build failed; it serves the previous bundle"));
+        assert_eq!(shown(0, true).warning, None, "with no pod, `unavailable` says it");
     }
 
     #[test]

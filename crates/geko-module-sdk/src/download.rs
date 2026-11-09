@@ -32,7 +32,9 @@ pub trait Downloader: Send + Sync {
 
     /// Whether this build asks the sources for changes to what it already downloaded. When not
     /// (the data are not due for a check, `[data] max_age_days`), a source keeps every download
-    /// it has, without contacting anyone, and downloads only what is missing.
+    /// it has, without contacting anyone, and downloads only what is missing. It also stops being
+    /// true once a source did not answer and its copy was kept: a module asks it after fetching, to
+    /// note the check, and this one did not happen, so the next build asks again.
     fn checks_for_updates(&self) -> bool {
         true
     }

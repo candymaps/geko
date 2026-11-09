@@ -1,0 +1,54 @@
+# Whether the modules of modules.lock work with this geko (docs/MODULE_UPDATES_PLAN.md): the real
+# packages, signed, through the conformance suite of the SDK, then a build and a server of Luxembourg
+# (ci/modules.sh verify). It runs on the pull requests that can change that, and before publishing:
+# publish.yml needs it, so that no geko goes out with modules it did not run with.
+#
+# It takes minutes and does not depend on the rest of ci.yml, so it runs apart from it.
+name: modules
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - modules.lock
+      - ci/modules.sh
+      - ci/modules-smoke.toml
+      - crates/geko-module-sdk/**
+      - crates/geko-fetch/**
+      - crates/geko-artifact/**
+      - crates/geko-app/src/dylib.rs
+      - crates/geko-app/src/remote.rs
+      - .github/workflows/modules.yml
+
+concurrency:
+  group: modules-${{ github.event.pull_request.number || github.ref }}
+  # A new push to a pull request supersedes its check; a publication waits for it.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: oras-project/setup-oras@v1
+      # The downloads of the last run that passed, which ci/modules.sh smoke reuses offline: a source
+      # that is down must not stop a release. The key changes so that a run that passes saves what
+      # it has; the next ones start from the newest.
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/geko
+          key: modules-smoke-${{ github.run_id }}
+          restore-keys: modules-smoke-
+      - env:
+          GEKO_SMOKE_DATA: ${{ runner.temp }}/geko
+        run: ci/modules.sh verify
