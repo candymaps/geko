@@ -35,7 +35,7 @@ La prueba de humo reutiliza las descargas de la última ejecución buena, en mod
 
 - [x] 2.1. Geocoder: validar el formato de sus datos en `load`. No hace falta cambiar nada: `geocode-fst` y `reverse-rstar` ya rechazan otro formato al abrirse, y `load` no cambia lo servido hasta abrir todos los segmentos. Esa rama no tiene prueba propia.
 - [x] 2.2. Router: lo mismo. Con `preload = true` ya lo hacía; con `preload = false` no miraba el fichero hasta la primera petición. Arreglado en `dev` del router (PR #13).
-- [ ] 2.3. ⏸ Publicar el router, y actualizar `modules.lock`. El geocoder no cambia, así que no hace falta publicarlo.
+- [x] 2.3. ⏸ Publicar el router, y actualizar `modules.lock`. El geocoder no cambia, así que no hace falta publicarlo. Hecho el 2026-11-10: router 0.2.0 (geko-router#17), junto con geocoder 0.3.1 y tiles 0.4.0, y `modules.lock` en #23.
 - [x] 2.4. Host: dejar de comparar versiones al cargar un bundle.
 - [x] 2.5. Host: carga, estado y errores por módulo, sin reintentar un bundle rechazado.
 - [x] 2.6. Host: `/health`, `/ready` y atribución por módulo.
@@ -55,18 +55,19 @@ Decidido al hacerlos:
 
 - [x] 3.1. `Dockerfile`: copiar a la imagen los paquetes de `modules.lock`, ya verificados. Lo hace la etapa `modules` con `ci/modules.sh pull`. La imagen pesa 212 MB, de ellos 33 MB de módulos. Comprobada en local: arranca, carga los tres por `GEKO_MODULES` y responde. Cambiar `modules.lock` ya publica imagen.
 - [x] 3.2. Operador y manifiestos: una sola imagen por defecto, y revisar `geko-minik8s`. Desaparecen `--image-prefix` y `--operator-image`: queda `--image`, para el operador y para cada módulo.
-- [ ] 3.3. ⏸ Publicar el host con esa imagen y comprobarla en kind.
-- [ ] 3.4. Geocoder y tiles: quitar `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen.
+- [x] 3.3. ⏸ Publicar el host con esa imagen y comprobarla en kind. Hecho el 2026-11-10: geko 0.4.0 (#24), con `kind` y `verify` en verde.
+- [x] 3.4. Geocoder y tiles: quitar `ci/image.Dockerfile`, `refresh-image.yml` y los pasos de imagen. Hecho en `dev` (geko-geocoder#12, geko-tiles#18): las versiones siguientes ya no publican imagen.
 
 ## Fase 4: borrar lo que sobra
 
-- [ ] 4.1. SDK: darle versión propia en sus tres crates, y que `publish.yml` cree `sdk-v<versión>`.
-- [ ] 4.2. Quitar `CONTRACT`: saludo, `Description`, bundles y `module.toml`.
-- [ ] 4.3. Quitar `store.rs`, `geko purge modules`, y `[modules.<m>] version` y `registry`, con un error claro si siguen en `geko.toml`.
-- [ ] 4.4. Quitar `ci/modules`, `ci/modules.sh check` y sus pasos en `ci.yml`, `publish.yml` y `pr-comment.yml`.
+- [x] 4.1. SDK: darle versión propia en sus tres crates, y que `publish.yml` cree `sdk-v<versión>`. Empieza en `2.0.0`. La etiqueta no se mueve: si el SDK cambia sin subir la versión, `publish.yml` falla.
+- [x] 4.2. Quitar `CONTRACT`: saludo, `Description`, bundles y `module.toml`. El host ya no comprueba nada, pero `BundleModule` sigue escribiendo `"contract": 1`, porque los módulos publicados lo exigen al leer el manifiesto (paso 4.8).
+- [x] 4.3. Quitar `store.rs`, `geko purge modules`, y `[modules.<m>] version` y `registry`, con un error claro si siguen en `geko.toml`.
+- [x] 4.4. Quitar `ci/modules`, `ci/modules.sh check` y sus pasos en `ci.yml`, `publish.yml` y `pr-comment.yml`.
 - [ ] 4.5. ⏸ Publicar el host, que crea la primera `sdk-v<versión>`.
-- [ ] 4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`.
+- [ ] 4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`. Hay que quitar `contract` de `Description` y de sus `BundleModule`, y dejar de usar `geko-module-sign contract` y `CONTRACT` en `ci/modules.sh`. El geocoder, además, `version` de `Linked`.
 - [ ] 4.7. ⏸ Publicar los módulos y actualizar `modules.lock`.
+- [ ] 4.8. Quitar `WrittenModule` de `bundle.rs`, que escribe el `contract` de los módulos antiguos, y subir la versión del SDK.
 
 ## Fase 5: documentación
 
@@ -80,6 +81,8 @@ Decidido al hacerlos:
 - **El paso 1.7 necesita un token.** GitHub no lanza las pruebas en los PR que abre el token por defecto de Actions, así que hará falta un token personal o una GitHub App como secreto del repositorio. Si aún no existe, ese paso se deja para el final.
 - **Las etiquetas ya publicadas se quedan:** `contract-1` y `sdk-1` no se borran, porque las usan los hosts instalados y los commits antiguos de los módulos. Solo dejan de moverse.
 - **El orden de las publicaciones es parte del plan:** los paquetes actuales siguen funcionando hasta 4.7. Hasta ese paso, el host aún tiene que aceptar los módulos publicados con contrato.
+- **La fase 4 no entra en `dev` hasta que 3.3 esté publicado:** si no, saldría a `main` con él.
+- **Entre 4.2 y 4.6, `make start-dev` y el job `operator` no compilan los módulos:** compilan su código contra el SDK de este árbol, y ese código aún escribe `contract`. Los módulos publicados no se ven afectados.
 
 ## Decisiones
 

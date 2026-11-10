@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::bundle::{BundleManifest, BundleModule, FORMAT};
-use crate::module::{BundleView, CONTRACT, Method, Module, Request, Response};
+use crate::module::{BundleView, Method, Module, Request, Response};
 
 /// Requests that a client may send to any route, for a module that has loaded nothing: every one
 /// must be answered, and none with 500.
@@ -78,7 +78,6 @@ fn check_metrics(text: &str) {
 /// Checks `module`, opened with an empty scope and without a bundle loaded.
 pub fn check(module: &dyn Module) {
     let d = module.describe();
-    assert_eq!(d.contract, CONTRACT, "the contract of this SDK");
     assert!(!d.version.is_empty(), "a version");
     assert_eq!(module.describe(), d, "describe is the same every time");
 
@@ -108,7 +107,7 @@ pub fn check(module: &dyn Module) {
 
     // A bundle without its part: loading it may fail, but leaves the module answering as before.
     let name = d.name.clone();
-    let entry = BundleModule { name, version: d.version.clone(), contract: CONTRACT, meta: serde_json::Value::Null };
+    let entry = BundleModule { name, version: d.version.clone(), meta: serde_json::Value::Null };
     let manifest = BundleManifest { format: FORMAT, version: "conformance".into(), created_unix: 0, modules: vec![entry.clone()], licenses: vec![], artifacts: vec![] };
     let empty = BundleView { root: PathBuf::from("/nonexistent/geko-conformance"), manifest, module: entry };
     let _ = module.load(&empty);
@@ -140,7 +139,6 @@ mod tests {
             Description {
                 name: ModuleName::new("minimal").unwrap(),
                 version: "1.0.0".into(),
-                contract: CONTRACT,
                 routes: vec![
                     Route { method: Method::Get, path: "v1/thing/{id}".into(), pool: false, public: false },
                     Route { method: Method::Post, path: "v1/batch".into(), pool: true, public: false },

@@ -6,7 +6,7 @@
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use crate::module::{CONTRACT, Module, Open};
+use crate::module::{Module, Open};
 use crate::wire::{Call, Reply, answer, frame, guarded, json, read_frame};
 use crate::{GekoError, Result};
 
@@ -39,14 +39,11 @@ impl Buffer {
     }
 }
 
-pub const HELLO: &[u8] = b"geko_module_hello\0";
 pub const OPEN: &[u8] = b"geko_module_open\0";
 pub const CALL: &[u8] = b"geko_module_call\0";
 pub const FREE: &[u8] = b"geko_module_free\0";
 pub const CLOSE: &[u8] = b"geko_module_close\0";
 
-/// Writes the greeting, with the contract, to `out`.
-pub type HelloFn = unsafe extern "C" fn(out: *mut Buffer);
 /// Opens the module with the frame of `Call::Open`; writes its answer to `out` and returns the
 /// module, or null if it did not open.
 pub type OpenFn = unsafe extern "C" fn(input: *const u8, len: usize, out: *mut Buffer) -> *mut c_void;
@@ -62,11 +59,6 @@ fn reply(reply: &Reply, payload: &[u8]) -> Buffer {
 
 fn error(e: &GekoError) -> Buffer {
     reply(&Reply::Err(e.into()), &[])
-}
-
-/// What `geko_module_hello` does.
-pub fn hello() -> Buffer {
-    reply(&Reply::Hello { contract: CONTRACT }, &[])
 }
 
 /// What `geko_module_open` does.
@@ -128,13 +120,6 @@ pub unsafe fn close(module: *mut c_void) {
 #[macro_export]
 macro_rules! export_module {
     ($open:path) => {
-        /// # Safety
-        /// As `geko_module_sdk::dylib::HelloFn`.
-        #[unsafe(no_mangle)]
-        pub unsafe extern "C" fn geko_module_hello(out: *mut $crate::dylib::Buffer) {
-            unsafe { out.write($crate::dylib::hello()) }
-        }
-
         /// # Safety
         /// As `geko_module_sdk::dylib::OpenFn`.
         #[unsafe(no_mangle)]

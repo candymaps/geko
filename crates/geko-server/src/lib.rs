@@ -231,12 +231,6 @@ fn offer(m: &Mounted, part: &ArcSwap<Part>, root: &std::path::Path, manifest: &B
             tracing::warn!(module = m.name(), %version, "the bundle has no part of this module");
             Err(Skipped::NoPart)
         }
-        Some(own) if own.contract != m.description.contract => Err(Skipped::Rejected(format!(
-            "bundle {version}: its {} part was built by a module of contract {}, and the module here is of contract {}",
-            m.name(),
-            own.contract,
-            m.description.contract
-        ))),
         Some(own) => {
             let view = BundleView { root: root.to_path_buf(), manifest: manifest.clone(), module: own.clone() };
             m.module.load(&view).map_err(|e| Skipped::Rejected(e.to_string()))
@@ -597,7 +591,6 @@ mod tests {
             Description {
                 name: ModuleName::new(if self.name.is_empty() { "fake" } else { self.name }).unwrap(),
                 version: if self.version.is_empty() { "1.0.0" } else { self.version }.into(),
-                contract: module::CONTRACT,
                 routes: vec![
                     route(Method::Get, "", false, true),
                     route(Method::Get, "v1/echo/{id}", true, false),
@@ -720,7 +713,7 @@ mod tests {
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert_eq!(body["waiting"], json!(["the part of fake in the bundle"]));
 
-        publish(dir.path(), "v2", module::CONTRACT);
+        publish(dir.path(), "v2");
         assert!(manager.refresh().unwrap());
         let (status, body) = get_json(&app, "/ready").await;
         assert_eq!((status, &body["ready"], &body["bundle"]), (StatusCode::OK, &json!(true), &json!("v2")));
@@ -739,22 +732,21 @@ mod tests {
         assert_eq!(get_json(&app, "/fake/v1/echo/x?api_key=k").await.0, StatusCode::OK);
     }
 
-    fn publish(dir: &std::path::Path, version: &str, contract: u32) {
-        publish_by(dir, version, contract, "1.0.0");
+    fn publish(dir: &std::path::Path, version: &str) {
+        publish_by(dir, version, "1.0.0");
     }
 
     /// Publishes `version` with the part of the fake module built by its version `by`.
-    fn publish_by(dir: &std::path::Path, version: &str, contract: u32, by: &str) {
-        publish_parts(dir, version, &[("fake", contract, by)]);
+    fn publish_by(dir: &std::path::Path, version: &str, by: &str) {
+        publish_parts(dir, version, &[("fake", by)]);
     }
 
-    fn publish_parts(dir: &std::path::Path, version: &str, parts: &[(&str, u32, &str)]) {
+    fn publish_parts(dir: &std::path::Path, version: &str, parts: &[(&str, &str)]) {
         let root = dir.join(version);
         std::fs::create_dir_all(&root).unwrap();
-        let module = |(name, contract, by): &(&str, u32, &str)| BundleModule {
+        let module = |(name, by): &(&str, &str)| BundleModule {
             name: module::ModuleName::new(name).unwrap(),
             version: (*by).into(),
-            contract: *contract,
             meta: json!({ "n": version }),
         };
         let licenses = vec![LicenseNotice { source: version.into(), name: "ODbL".into(), attribution: "OSM".into(), url: None }];
@@ -773,7 +765,7 @@ mod tests {
     }
 
     #[test]
-    fn manager_loads_only_new_versions_of_a_compatible_contract() {
+    fn manager_loads_only_new_versions() {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(Fake::default());
         let manager = BundleManager::new(
@@ -781,17 +773,13 @@ mod tests {
             vec![Mounted::new(fake.clone())],
         );
         assert!(!manager.refresh().unwrap(), "nothing published yet");
-        publish(dir.path(), "v1", module::CONTRACT);
+        publish(dir.path(), "v1");
         assert!(manager.refresh().unwrap());
         assert!(!manager.refresh().unwrap());
-        publish(dir.path(), "v2", module::CONTRACT);
+        publish(dir.path(), "v2");
         assert!(manager.refresh().unwrap());
         assert_eq!(*fake.loaded.lock().unwrap(), [r#"v1 "v1""#, r#"v2 "v2""#]);
         assert_eq!(manager.version().as_deref(), Some("v2"));
-        publish(dir.path(), "v3", module::CONTRACT + 1);
-        assert!(!manager.refresh().unwrap(), "a part of another contract is not taken");
-        assert_eq!(manager.version().as_deref(), Some("v2"), "the previous one stays");
-        assert!(manager.error().is_some_and(|e| e.contains("contract")), "and /health says why");
     }
 
     #[test]
@@ -799,7 +787,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let fake = Arc::new(Fake::default());
         let manager = BundleManager::new(BundleSource { dir: dir.path().to_path_buf(), reload: Duration::from_secs(1), pull: None }, vec![Mounted::new(fake.clone())]);
-        publish_by(dir.path(), "v1", module::CONTRACT, "0.9.0");
+        publish_by(dir.path(), "v1", "0.9.0");
         assert!(manager.refresh().unwrap());
         assert_eq!(*fake.loaded.lock().unwrap(), [r#"v1 "v1""#]);
         assert_eq!(manager.error(), None);
@@ -814,7 +802,7 @@ mod tests {
         (good, bad, mounted, manager)
     }
 
-    const BOTH: [(&str, u32, &str); 2] = [("bad", module::CONTRACT, "1.0.0"), ("good", module::CONTRACT, "1.0.0")];
+    const BOTH: [(&str, &str); 2] = [("bad", "1.0.0"), ("good", "1.0.0")];
 
     #[tokio::test]
     async fn a_module_that_rejects_a_bundle_holds_back_no_other() {

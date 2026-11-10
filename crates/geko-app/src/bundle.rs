@@ -401,7 +401,7 @@ mod tests {
     }
 
     fn module(name: &str) -> BundleModule {
-        BundleModule { name: ModuleName::new(name).unwrap(), version: "1.0.0".into(), contract: 1, meta: serde_json::json!({ "segments": [] }) }
+        BundleModule { name: ModuleName::new(name).unwrap(), version: "1.0.0".into(), meta: serde_json::json!({ "segments": [] }) }
     }
 
     /// The two parts of a segment of the geocoder, written in `dir`.

@@ -146,7 +146,7 @@ mod tests {
         let from = work.join(name);
         fs::create_dir_all(&from).unwrap();
         fs::write(from.join("data.bin"), content).unwrap();
-        let module = BundleModule { name: ModuleName::new(name).unwrap(), version: "1.0.0".into(), contract: 1, meta: serde_json::Value::Null };
+        let module = BundleModule { name: ModuleName::new(name).unwrap(), version: "1.0.0".into(), meta: serde_json::Value::Null };
         (vec![BundlePart { from, to: top.into() }], module)
     }
 

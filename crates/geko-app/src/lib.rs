@@ -11,7 +11,6 @@ mod operator;
 mod progress;
 mod remote;
 mod run;
-mod store;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -176,9 +175,6 @@ enum Purge {
         #[arg(long)]
         all: bool,
     },
-    /// The downloaded versions of the modules that neither the configuration nor any bundle kept
-    /// needs.
-    Modules,
 }
 
 fn serve(config: &Config, opened: &[Opened], listen: Option<SocketAddr>) -> anyhow::Result<()> {
@@ -232,20 +228,6 @@ fn purge(modules: &[Arc<dyn Module>], what: geko_module_sdk::module::Purge) -> a
     Ok(())
 }
 
-/// The (module, version) pairs still needed: those of the active modules and those that built a
-/// part of a bundle kept.
-fn modules_in_use(config: &Config, modules: &[Arc<dyn Module>]) -> Vec<(String, String)> {
-    let mut used: Vec<(String, String)> = modules.iter().map(|m| m.describe()).map(|d| (d.name.to_string(), d.version)).collect();
-    if let Ok(entries) = std::fs::read_dir(config.bundles_dir()) {
-        for dir in entries.filter_map(|e| e.ok().map(|e| e.path())) {
-            if let Ok(manifest) = geko_module_sdk::bundle::BundleManifest::read(&dir) {
-                used.extend(manifest.modules.into_iter().map(|m| (m.name.to_string(), m.version)));
-            }
-        }
-    }
-    used
-}
-
 /// `geko <module> <command> …`: a command of an active module.
 fn module_command(modules: &[Arc<dyn Module>], args: &[String]) -> anyhow::Result<()> {
     let [name, rest @ ..] = args else { unreachable!("clap gives the name of the subcommand") };
@@ -285,7 +267,7 @@ fn check_deploy(config: &Config, cli: &Cli) -> anyhow::Result<()> {
 }
 
 /// Runs geko with the command line of this process and `linked`, the modules linked into it, which
-/// `GEKO_MODULES` comes before and the downloads after (`modules`).
+/// `GEKO_MODULES` comes before (`modules`).
 pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
     let cli = Cli::parse();
     if cli.verbose {
@@ -323,10 +305,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
         _ => {}
     }
     let active = modules::resolve(&config, cli.modules.as_deref())?;
-    let mut opener = Opener::new(&config, &path, linked, modules::local()?);
-    if std::env::var_os("GEKO_MODULES").is_some() {
-        opener = opener.without_downloads();
-    }
+    let opener = Opener::new(&config, &path, linked, modules::local()?);
     let opened = active.iter().map(|name| opener.open(name)).collect::<geko_module_sdk::Result<Vec<_>>>()?;
     let modules: Vec<Arc<dyn Module>> = opened.iter().map(|o| Arc::clone(&o.module)).collect();
     // Naming the modules (`--module geocoder`) is building some of them: the bundle keeps the part
@@ -335,7 +314,7 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
 
     match cli.command {
         Command::Plan => {
-            println!("Modules (contract {}):", geko_module_sdk::module::CONTRACT);
+            println!("Modules:");
             for o in &opened {
                 let d = o.module.describe();
                 println!("  {} {}: {}", d.name, d.version, o.origin);
@@ -380,11 +359,6 @@ pub fn main(linked: Vec<Linked>) -> anyhow::Result<()> {
             if let None | Some(Purge::Packages { .. }) = what {
                 let all = matches!(what, Some(Purge::Packages { all: true }));
                 purge(&modules, geko_module_sdk::module::Purge::Packages { all })?;
-            }
-            if let None | Some(Purge::Modules) = what {
-                for dir in opener.store().purge(&modules_in_use(&config, &modules))? {
-                    println!("purged {}", dir.display());
-                }
             }
         }
         Command::K8s { .. } | Command::Operator { .. } => unreachable!("handled above, before any module is opened"),
