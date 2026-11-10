@@ -23,9 +23,7 @@ jobs:
 
   # Publishes in ghcr.io, with the version of Cargo.toml:
   # - if the push changed what goes into it (not only documentation), the image
-  #   (ghcr.io/candymaps/geko, tag <version>-<commit>), which carries no module: it downloads those
-  #   of its configuration, from their repositories; only once every module of ci/modules is
-  #   published for its contract (ci/modules.sh check);
+  #   (ghcr.io/candymaps/geko, tag <version>-<commit>), with the modules of modules.lock;
   # - when that version has no GitHub release yet (it was raised in Cargo.toml), also the tag
   #   <version> and latest on the image, and the git tag v<version> on
   #   the pushed commit, with its GitHub release, whose notes say how to pull the image. Raising the
@@ -80,29 +78,22 @@ jobs:
             echo "tags=$tags"
             echo "image=$image"
           } >> "$GITHUB_OUTPUT"
-      # The SDK of the contract and what the host shares with its modules (geko-fetch, geko-artifact),
-      # which the modules use from their repositories as git dependencies: sdk-<n> follows the last
-      # commit that changed any of them within contract <n>.
+      # The SDK and what the host shares with its modules (geko-fetch, geko-artifact), which the
+      # modules use from their repositories as git dependencies, at the tag sdk-v<version> of their
+      # version. A tag never moves: a change to any of them raises it, in the three crates.
       - if: steps.version.outputs.image == '1'
         run: |
-          contract=$(sed -n 's/^pub const CONTRACT: u32 = \([0-9]*\);/\1/p' crates/geko-module-sdk/src/module.rs)
-          if [ "$(git rev-parse -q --verify "refs/tags/sdk-$contract^{commit}" || true)" = "" ] \
-            || ! git diff --quiet "sdk-$contract" HEAD -- crates/geko-module-sdk crates/geko-fetch crates/geko-artifact Cargo.lock; then
-            git tag -f "sdk-$contract" HEAD
-            git push -f origin "refs/tags/sdk-$contract"
+          sdk=(crates/geko-module-sdk crates/geko-fetch crates/geko-artifact)
+          version=$(sed -n 's/^version = "\([^"]*\)".*/\1/p' crates/geko-module-sdk/Cargo.toml)
+          for crate in "${sdk[@]}"; do
+            grep -q "^version = \"$version\"" "$crate/Cargo.toml" || { echo "::error::$crate is not at version $version of the SDK"; exit 1; }
+          done
+          if git rev-parse -q --verify "refs/tags/sdk-v$version^{commit}" > /dev/null; then
+            git diff --quiet "sdk-v$version" HEAD -- "${sdk[@]}" || { echo "::error::the SDK changed since sdk-v$version: raise its version"; exit 1; }
+          else
+            git tag "sdk-v$version" HEAD
+            git push origin "refs/tags/sdk-v$version"
           fi
-      # No image nor release until every module of ci/modules is published for its contract: geko
-      # loads no module of another. The pull request of a new contract already checked it (ci.yml);
-      # this guards what changed in the registry since. It goes after the tag of the SDK: if it
-      # fails, a new run of this workflow publishes the image once the modules are published.
-      # Reading the private packages of the modules needs the access of this repository in their
-      # settings.
-      - if: steps.version.outputs.image == '1'
-        uses: oras-project/setup-oras@v1
-      - if: steps.version.outputs.image == '1'
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
-          ci/modules.sh check
       - if: steps.version.outputs.image == '1'
         uses: docker/setup-buildx-action@v3
       - if: steps.version.outputs.image == '1'

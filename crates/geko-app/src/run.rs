@@ -71,7 +71,7 @@ pub fn build(config: &Config, modules: &[Arc<dyn Module>], force: bool, refresh:
             continue;
         }
         let d = m.describe();
-        entries.push(BundleModule { name: d.name, version: d.version, contract: d.contract, meta: built.meta });
+        entries.push(BundleModule { name: d.name, version: d.version, meta: built.meta });
         parts.extend(built.parts);
         for l in built.licenses {
             if !licenses.iter().any(|k| k.source == l.source) {
@@ -164,7 +164,7 @@ mod tests {
     use std::path::PathBuf;
 
     use geko_module_sdk::bundle::current_version;
-    use geko_module_sdk::module::{Built, CONTRACT, Description};
+    use geko_module_sdk::module::{Built, Description};
 
     use super::*;
 
@@ -180,7 +180,6 @@ mod tests {
             Description {
                 name: ModuleName::new(self.name).unwrap(),
                 version: "1.0.0".into(),
-                contract: CONTRACT,
                 routes: vec![],
                 openapi: None,
                 attribution: None,

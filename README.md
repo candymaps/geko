@@ -78,17 +78,11 @@ Every section and option of geko itself (the host), with its default value unles
 
 ```toml
 # Every module, enabled or not (`true`, `false`, or a table with `enabled` and `config`, the file
-# it reads, by default geko-<module>.toml beside this one). A module linked into geko is used as it
-# is; otherwise geko downloads it into /var/lib/geko/modules: the newest version of the contract it
-# speaks, or the one fixed with `version` (geko plan shows which). `geko serve` uses the version that
-# built the bundle it serves, and downloads it if missing.
+# it reads, by default geko-<module>.toml beside this one). Each version of geko carries its modules,
+# those of its modules.lock (geko plan shows them).
 [modules]
 geocoder = true
 tiles    = true
-
-# [modules.geocoder]                # instead of `geocoder = true` above
-# version  = "1.4.2"                # default: the newest of the contract of this geko
-# registry = "ghcr.io/candymaps/geko-geocoder"   # default: ghcr.io/candymaps/geko-<module>
 
 [[scope]]                           # one per country; no default
 country = "ES"                      # ISO 3166-1
