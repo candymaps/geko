@@ -167,6 +167,86 @@ fn always_policy_sends_no_validators() {
 }
 
 #[test]
+fn a_copy_is_kept_when_the_source_is_down() {
+    for policy in [RefreshPolicy::IfChanged, RefreshPolicy::Always] {
+        let server = serve(|_, i| if i == 0 { Resp::ok(b"hello", "\"v1\"") } else { Resp::status(503) });
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("data.bin");
+        let dl = downloader(policy, false);
+
+        dl.fetch(&request(&server), &dest).unwrap();
+        assert!(dl.checks_for_updates());
+        let second = dl.fetch(&request(&server), &dest).unwrap();
+
+        assert!(!second.downloaded);
+        assert_eq!(second.sha256, sha256_hex(b"hello"));
+        assert_eq!(fs::read(&dest).unwrap(), b"hello");
+        assert!(!dl.checks_for_updates(), "this run did not check, so no module notes that it did");
+    }
+}
+
+#[test]
+fn a_copy_is_kept_when_nothing_answers() {
+    let server = serve(|_, _| Resp::ok(b"hello", "\"v1\""));
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("data.bin");
+    downloader(RefreshPolicy::IfChanged, false).fetch(&request(&server), &dest).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/data.bin", listener.local_addr().unwrap());
+    drop(listener);
+    let mut record = record::read(&dest).unwrap();
+    record.url.clone_from(&url);
+    record::write(&dest, &record).unwrap();
+
+    let outcome = downloader(RefreshPolicy::IfChanged, false).fetch(&DownloadRequest { url, checksum: None }, &dest).unwrap();
+
+    assert!(!outcome.downloaded);
+}
+
+#[test]
+fn a_removed_copy_is_kept_when_the_source_is_down() {
+    let server = serve(|_, i| if i == 0 { Resp::ok(b"hello", "\"v1\"") } else { Resp::status(503) });
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("data.bin");
+    let dl = downloader(RefreshPolicy::IfChanged, false);
+    dl.fetch(&request(&server), &dest).unwrap();
+    fs::remove_file(&dest).unwrap();
+
+    assert!(!dl.fetch(&request(&server), &dest).unwrap().downloaded);
+
+    let restorer = HttpDownloader::new(HttpDownloaderConfig { restore_removed: true, attempts: 1, ..Default::default() });
+    assert!(restorer.fetch(&request(&server), &dest).is_err(), "a stage needs the bytes, and a record is not enough");
+}
+
+#[test]
+fn a_source_that_answers_no_is_not_a_source_that_is_down() {
+    let server = serve(|_, i| if i == 0 { Resp::ok(b"hello", "\"v1\"") } else { Resp::status(404) });
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("data.bin");
+    let dl = downloader(RefreshPolicy::IfChanged, false);
+
+    dl.fetch(&request(&server), &dest).unwrap();
+
+    assert!(dl.fetch(&request(&server), &dest).unwrap_err().to_string().contains("404"));
+    assert!(dl.checks_for_updates());
+}
+
+#[test]
+fn a_copy_with_another_sha256_is_not_kept() {
+    let server = serve(|_, i| if i == 0 { Resp::ok(b"hello", "\"v1\"") } else { Resp::status(503) });
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("data.bin");
+    let dl = downloader(RefreshPolicy::IfChanged, false);
+    dl.fetch(&request(&server), &dest).unwrap();
+
+    let other = DownloadRequest { url: server.url.clone(), checksum: Some(Checksum::Sha256(sha256_hex(b"other"))) };
+    assert!(dl.fetch(&other, &dest).is_err());
+
+    let same = DownloadRequest { url: server.url.clone(), checksum: Some(Checksum::Sha256(sha256_hex(b"hello"))) };
+    assert!(!dl.fetch(&same, &dest).unwrap().downloaded);
+}
+
+#[test]
 fn offline_mode_never_touches_the_network() {
     let server = serve(|_, _| Resp::ok(b"hello", "\"v1\""));
     let dir = tempfile::tempdir().unwrap();
