@@ -1,6 +1,6 @@
 # Plan de actualización de módulos
 
-Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub; fase 2 hecha en el host, a falta de publicar geocoder y router (2026-11-06). Rama: `feature/module-updates`. El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
+Estado: hecho (2026-11-11). El análisis y los motivos están en [`MODULE_UPDATES_REPORT.md`](MODULE_UPDATES_REPORT.md).
 
 **Objetivo:** solo se elige la versión del host, y ella decide exactamente qué módulos lleva. La compatibilidad de código se comprueba al publicar, y cada módulo funciona de forma independiente.
 
@@ -14,7 +14,7 @@ Estado: fase 1 hecha, salvo el token del paso 1.7 y su prueba en GitHub; fase 2 
 - [x] 1.4. Crear la prueba de humo: build y `serve` de Luxemburgo con los tres módulos.
 - [x] 1.5. Crear el workflow `modules.yml`, para los PR que cambien `modules.lock` o la SDK.
 - [x] 1.6. Hacer que `publish.yml` exija ese mismo trabajo.
-- [ ] 1.7. Crear un workflow programado que compare el registro con `modules.lock` y abra el PR a `dev`. Escrito (`modules-update.yml`); falta el secreto `GEKO_MODULES_PR_TOKEN`, y sin él avisa y no hace nada.
+- [x] 1.7. Crear un workflow programado que compare el registro con `modules.lock` y abra el PR a `dev`. Hecho (`modules-update.yml`) y probado el 2026-11-11 con el secreto `GEKO_MODULES_PR_TOKEN`: abrió el PR #29. El secreto es permanente: sin él, el workflow avisa y no hace nada.
 - [x] 1.8. Medir cuánto tarda.
 
 Medido el 2026-11-06, en WSL, sin compilar geko desde cero:
@@ -64,16 +64,16 @@ Decidido al hacerlos:
 - [x] 4.2. Quitar `CONTRACT`: saludo, `Description`, bundles y `module.toml`. El host ya no comprueba nada, pero `BundleModule` sigue escribiendo `"contract": 1`, porque los módulos publicados lo exigen al leer el manifiesto (paso 4.8).
 - [x] 4.3. Quitar `store.rs`, `geko purge modules`, y `[modules.<m>] version` y `registry`, con un error claro si siguen en `geko.toml`.
 - [x] 4.4. Quitar `ci/modules`, `ci/modules.sh check` y sus pasos en `ci.yml`, `publish.yml` y `pr-comment.yml`.
-- [ ] 4.5. ⏸ Publicar el host, que crea la primera `sdk-v<versión>`.
-- [ ] 4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`. Hay que quitar `contract` de `Description` y de sus `BundleModule`, y dejar de usar `geko-module-sign contract` y `CONTRACT` en `ci/modules.sh`. El geocoder, además, `version` de `Linked`.
-- [ ] 4.7. ⏸ Publicar los módulos y actualizar `modules.lock`.
-- [ ] 4.8. Quitar `WrittenModule` de `bundle.rs`, que escribe el `contract` de los módulos antiguos, y subir la versión del SDK.
+- [x] 4.5. ⏸ Publicar el host, que crea la primera `sdk-v<versión>`. Hecho: geko 0.5.0 (#28) y `sdk-v2.0.0`.
+- [x] 4.6. Los tres módulos pasan a `tag = "sdk-v<versión>"` y dejan de mover `contract-<n>`. Hay que quitar `contract` de `Description` y de sus `BundleModule`, y dejar de usar `geko-module-sign contract` y `CONTRACT` en `ci/modules.sh`. El geocoder, además, `version` de `Linked`.
+- [x] 4.7. ⏸ Publicar los módulos y actualizar `modules.lock`. Hecho el 2026-11-11: geocoder 0.4.0, tiles 0.5.0 y router 0.3.0, con `modules.lock` en #29.
+- [x] 4.8. Quitar `WrittenModule` de `bundle.rs`, que escribe el `contract` de los módulos antiguos, y subir la versión del SDK. Hecho en #30: SDK `2.0.1`.
 
 ## Fase 5: documentación
 
-- [ ] 5.1. `PROJECT.md`, `MODULES_PLAN.md`, `README.md` y `jekyll/`.
-- [ ] 5.2. `AGENTS.md` de cada repositorio.
-- [ ] 5.3. `AGENTS.md` y `docs/architecture.md` de `geko-context`.
+- [x] 5.1. `PROJECT.md`, `MODULES_PLAN.md`, `README.md` y `jekyll/`.
+- [x] 5.2. `AGENTS.md` de cada repositorio (y los `README.md` de tiles y router, que citaban `sdk-<contract>`).
+- [x] 5.3. `AGENTS.md` y `docs/architecture.md` de `geko-context`. Solo cambió `docs/architecture.md`.
 
 ## Antes de empezar
 
