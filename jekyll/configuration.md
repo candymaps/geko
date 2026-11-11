@@ -18,17 +18,15 @@ its own `geko-<module>.toml` beside it. The options of a module are documented i
 
 ```toml
 # Every module, enabled or not (`true`, `false`, or a table with `enabled` and `config`, the file
-# it reads, by default geko-<module>.toml beside this one). A module linked into geko is used as it
-# is; otherwise geko downloads it into /var/lib/geko/modules: the newest version of the contract it
-# speaks, or the one fixed with `version` (geko plan shows which). `geko serve` uses the version that
-# built the bundle it serves, and downloads it if missing.
+# it reads, by default geko-<module>.toml beside this one). geko downloads no module: the image carries
+# the ones of its version (`modules.lock`), so the version of geko decides which ones it runs.
 [modules]
 geocoder = true
 tiles    = true
 
 # [modules.geocoder]                # instead of `geocoder = true` above
-# version  = "1.4.2"                # default: the newest of the contract of this geko
-# registry = "ghcr.io/candymaps/geko-geocoder"   # default: ghcr.io/candymaps/geko-<module>
+# enabled = true
+# config  = "geko-geocoder.toml"    # `version` and `registry` are an error: geko no longer downloads modules
 
 [[scope]]                           # one per country; no default
 country = "ES"                      # ISO 3166-1
@@ -73,8 +71,8 @@ mode = "single"                     # single: every module in one process, where
 | The binary | `/usr/local/bin/geko` |
 | The configuration of geko | `/etc/geko/geko.toml`, or `GEKO_CONFIG` |
 | The configuration of a module | `geko-<module>.toml`, beside `geko.toml` |
-| The data (downloads, bundles, modules) | `/var/lib/geko`, or `GEKO_DATA` |
-| The modules downloaded | `/var/lib/geko/modules/<module>/<version>/` |
+| The data (downloads, bundles) | `/var/lib/geko`, or `GEKO_DATA` |
+| The modules | The ones of the image, in the folder of `GEKO_MODULES` |
 
 There is no `--config` option and no `[data] dir`: only `GEKO_CONFIG` and `GEKO_DATA` change those
 paths.

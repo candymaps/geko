@@ -14,13 +14,10 @@ tells geko what it needs for the scope; a module that is disabled downloads noth
 
 ## Downloads
 
-Modules that are not linked into geko or listed in `GEKO_MODULES` are downloaded first, from
-`ghcr.io/candymaps/geko-<module>` (`[modules.<module>] registry` changes where from), into
-`/var/lib/geko/modules/<module>/<version>/`. It is the newest version of the contract of this geko, or
-the one fixed with `version`, and only if it carries a signature that geko trusts and is for the platform
-of the host. See [Security and licenses]({% link security.md %}).
+geko downloads no module: those of its version come in the image (`modules.lock`), signed and for the
+platform of the host, and `GEKO_MODULES` points to them. See [Security and licenses]({% link security.md %}).
 
-Then each module downloads the data it needs for the scope. The downloader handles:
+Each module downloads the data it needs for the scope. The downloader handles:
 
 - **Safe writes:** a download is written to a `.part` file and renamed when it ends, so a half download
   never looks complete.
@@ -72,7 +69,7 @@ A build publishes a **bundle**: an immutable, versioned folder with the part of 
 ```
 bundles/
   v2026-10-15T030000/
-    manifest.json             # version, modules (version, contract), licenses, hash of each artifact
+    manifest.json             # version, modules (version), licenses, hash of each artifact
     <what each module made>   # e.g. segments/<country>/ of the geocoder
   current -> v2026-10-15T030000
   current.version             # the version of current, for whoever reads it over HTTP

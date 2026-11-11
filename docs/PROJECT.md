@@ -87,7 +87,7 @@ El servicio de producción es Linux. El desarrollo puede hacerse en Windows o WS
 | `Module` | El contrato de un módulo: describirse, planificar, descargar, generar su parte del bundle, cargarla, atender peticiones, métricas, órdenes | `StaticModule` (enlazado), `DylibModule` (biblioteca cargada en el proceso; el único adaptador de un paquete desde el 2026-10-23) |
 | `Downloader` | Descargar ficheros con caché, reanudación, ETag, reintentos y sumas de control | `geko-fetch` (HTTP); descargadores falsos en las pruebas |
 
-El contrato está en `crates/geko-module-sdk` (`module.rs`), con su número (`CONTRACT`). Un cambio que lo rompe sube el número; uno aditivo, no. Cada módulo publicado lleva el contrato que habla, y el host baja el último de su contrato.
+El contrato está en `crates/geko-module-sdk` (`module.rs`). El SDK tiene su propia versión (`sdk-v<versión>`, la misma en sus tres crates) y el host no compara nada al cargar un módulo: la compatibilidad se comprueba al publicar, con los módulos reales de `modules.lock` (`modules.yml`), y cada módulo valida el formato de sus propios datos al cargarlos. Lo que se publica con una versión del host es exactamente lo que dice `modules.lock`.
 
 ## 5. Configuración
 
@@ -95,7 +95,7 @@ La configuración está siempre en `/etc/geko/geko.toml`, con la de cada módulo
 
 ```toml
 [modules]
-geocoder = true                 # o una tabla: { enabled, config, version, registry }
+geocoder = true                 # o una tabla: { enabled, config }
 tiles    = true
 
 [[scope]]
@@ -137,7 +137,7 @@ No es asesoría legal: antes de abrir el servicio al público, conviene que lo r
 
 ### 7.1 Qué se descarga
 
-**módulos activos → lo que cada módulo pide para el ámbito**. Un módulo desactivado no descarga nada. Los módulos que no están enlazados ni en `GEKO_MODULES` se bajan antes, de `ghcr.io/candymaps/geko-<módulo>` (`[modules.<módulo>] registry`), a `/var/lib/geko/modules/<módulo>/<versión>/`: el último de su contrato o el de `version`, solo si lleva una firma de `TRUSTED_KEYS` (`geko-artifact`) y es de la plataforma del host.
+**módulos activos → lo que cada módulo pide para el ámbito**. Un módulo desactivado no descarga nada. El host no descarga módulos: los de `modules.lock` van en la imagen, y `GEKO_MODULES` apunta a ellos; un módulo activo que no está enlazado ni ahí es un error. Los paquetes se bajan al construir la imagen (`ci/modules.sh pull`), por su digest y solo si llevan una firma de `TRUSTED_KEYS` (`geko-artifact`) y son de la plataforma del host.
 
 ### 7.2 Mecánica (`geko-fetch`)
 
@@ -236,7 +236,7 @@ geko/
 
 1. **Host y módulos** (docs/MODULES_PLAN.md): pasos 1–6 *(hechos; quedan las semanas de uso real del paso 6)*; paso 7, los repositorios aparte *(hecho, 2026-10-22)*.
 2. **Operación:** `BundleStore` con S3 y enrutador entre nodos; regeneración programada con diffs *(del geocoder)*.
-3. **Más módulos:** teselas (`tiles`) *(publicado, 2026-10-26)*; enrutamiento (`router`) *(en `ci/modules`, desactivado por defecto; lo que le falta, en su `docs/ROUTER_PLAN.md`)*.
+3. **Más módulos:** teselas (`tiles`) *(publicado, 2026-10-26)*; enrutamiento (`router`) *(en `modules.lock`, desactivado por defecto; lo que le falta, en su `docs/ROUTER_PLAN.md`)*.
 
 ## 15. Stack
 
@@ -254,22 +254,23 @@ Esfuerzo: **S** = horas, **M** = una o dos jornadas, **L** = varias jornadas. Es
 | 43 | `BundleStore` con S3 y enrutador entre nodos | Hoy los bundles se sirven de disco o por HTTP (`bundles_url`) | M | ⬜ Cuando un nodo no baste |
 | 46 | Módulos descargables | Plan en [MODULES_PLAN.md](MODULES_PLAN.md) | L | ⬜ Pasos 1–5 y 7 hechos; del 6, la suite hecha, y quedan unas semanas de uso real. Decidido (2026-10-23): `DylibModule`, elegido por la medición con España, es el único adaptador; `ProcessModule` se quitó |
 | 49 | Instalación nueva con Geofabrik caído | Los tres módulos bajan de ahí los extractos, y sin copia no hay build. Mirado el 2026-11-07, no hay mirror con esos ficheros: `ftp5.gwdg.de` solo tiene `europe`, `germany` y `north-america` (404 con España y Baleares); BBBike y movisda hacen sus propios recortes, y `osm-internal` pide cuenta de OSM. La opción `mirror` de cada módulo sirve para uno que aparezca | L | ⏸️ La salida sería una copia propia de los extractos, con su coste y contra la regla de no publicar datos propios de tiles. Sin decidir |
-| 47 | Pruebas cruzadas | El golden del geocoder contra la última imagen del host de su contrato, y la conformidad del host contra el último módulo publicado (MODULES_PLAN.md, paso 7) | M | ⬜ |
+| 47 | Pruebas cruzadas | La conformidad del host contra el módulo publicado está hecha (`modules.yml`, con `modules.lock`); falta el golden del geocoder contra la última imagen del host (MODULES_PLAN.md, paso 7) | M | ⬜ |
 | 48 | Datos de un módulo desactivado | `geko purge` solo pregunta a los módulos activos, y uno desactivado no se instancia: sus descargas y ficheros de trabajo (los del geocoder: `raw/`, `staging/`, `canonical/`, `segments/`, decenas de GB con España) se quedan en `/var/lib/geko` para siempre. Además están en su raíz, sin carpeta por módulo, así que el host no sabe de quién son | M | ⬜ Cada módulo, con su carpeta de datos (`/var/lib/geko/<módulo>/`, dada en el `Context`), y el host decide cuándo borrar la de uno desactivado: nunca por defecto, para que desactivarlo un tiempo no obligue a descargar y generar de cero; a demanda con `geko purge data` (o `geko purge module <módulo>`); y, opcional, al cabo de un plazo configurable en `geko.toml` (por ejemplo `[data] purge_disabled_after_days`, apagado por defecto) |
 
 ## 17. Rutas
 
-- `geko` lee siempre `/etc/geko/geko.toml` y guarda sus datos en `/var/lib/geko`: descargas (`raw/`), módulos bajados (`modules/`), lo de trabajo de cada módulo y los bundles publicados (`bundles/`).
+- `geko` lee siempre `/etc/geko/geko.toml` y guarda sus datos en `/var/lib/geko`: descargas (`raw/`), lo de trabajo de cada módulo y los bundles publicados (`bundles/`).
 - Para generar en una máquina y servir en otra, la que genera ofrece su `/var/lib/geko/bundles` por HTTP y la que sirve lo indica en `[serve] bundles_url`.
 - `GEKO_CONFIG` y `GEKO_DATA` cambian las dos rutas, y `GEKO_MODULES` de dónde salen los módulos. Son para las comprobaciones y el desarrollo.
 - Al cambiar el ámbito o los módulos, lo que ya no se pide se queda en `/var/lib/geko`, por si vuelve; se borra con `geko purge` (sección 3.1). Las versiones antiguas de los bundles las retira `[build] keep`.
 
 ## 18. Estado
 
-- **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, o bajada firmada de ghcr.io); la imagen publicada no lleva ninguno. Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
+- **Host y módulos** (2026-10-21/22, [MODULES_PLAN.md](MODULES_PLAN.md)): el host solo conoce los módulos por el contrato de `geko-module-sdk`. Cada módulo corre enlazado o como biblioteca cargada en el proceso de geko (`GEKO_MODULES`, que en la imagen apunta a los de `modules.lock`). Con el geocoder y España (2026-10-22), los datos salen idénticos a los de antes de los módulos; como proceso propio se perdía del 19 al 55 % de caudal con 16 a la vez, y como biblioteca, nada fuera del ruido, así que `ProcessModule` se quitó (2026-10-23).
 - **Repositorios aparte** (2026-10-22): el geocoder (con los packs y los idiomas) en `candymaps/geko-geocoder` y `tiles` en `candymaps/geko-tiles`, con la SDK como dependencia de git.
-- **Teselas** (2026-10-26): `tiles` publicado (`0.1.0`), en `ci/modules` y activo por defecto, como el geocoder.
-- **Enrutamiento** (2026-11-06): `router`, en `candymaps/geko-router`, con los packs `es` y `lu`. Está en `ci/modules` y desactivado por defecto: se activa con `[modules] router = true`.
+- **Teselas** (2026-10-26): `tiles` publicado (`0.1.0`), en `modules.lock` y activo por defecto, como el geocoder.
+- **Enrutamiento** (2026-11-06): `router`, en `candymaps/geko-router`, con los packs `es` y `lu`. Está en `modules.lock` y desactivado por defecto: se activa con `[modules] router = true`.
+- **Actualización de módulos** (2026-11-11, [MODULE_UPDATES_PLAN.md](MODULE_UPDATES_PLAN.md)): solo se elige la versión del host, y `modules.lock` decide qué módulos lleva (hoy geocoder `0.4.0`, tiles `0.5.0` y router `0.3.0`). La imagen los lleva dentro y el host no descarga módulos; `modules.yml` los prueba antes de publicar, y `modules-update.yml` propone cada día el PR que sube `modules.lock`. Cada módulo carga, falla y responde por su cuenta. El SDK tiene versión propia (`sdk-v2.0.1`) y `CONTRACT` desapareció.
 - **Servicio:** dashboard en `/` (`ui/`, incrustado en el binario) y `GET /admin/api/modules`, `geko up`, CORS, claves de API, límite de peticiones, recarga en caliente y bundles por HTTP (`bundles_url`).
 
 ## 19. Comprobaciones

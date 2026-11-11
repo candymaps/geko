@@ -74,7 +74,7 @@ Without a subcommand, it removes all of the following.
 |---|---|
 | `data` | The downloads and work files of countries, regions and sources that the configuration no longer asks for (what `build --purge` removes, without building). |
 | `packages [--all]` | The data packages the modules downloaded (the country packs of the geocoder) for the countries outside the scope. With `--all`, all of them: they are downloaded again when a build needs them. |
-| `modules` | The downloaded versions of the modules that neither the configuration nor any kept bundle needs. |
+
 
 ### `geko k8s render [options]`
 

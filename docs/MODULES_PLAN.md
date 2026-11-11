@@ -2,6 +2,8 @@
 
 Estado: paso 1 hecho (2026-10-21, commit b814bd0); paso 2 (adaptadores dinámicos) hecho (2026-10-22), con la medición A/B con España: se elige `DylibModule`, el único adaptador desde el 2026-10-23 (`ProcessModule` se quitó); paso 3 (registro y versiones) hecho (2026-10-22); paso 4 (CI, imagen y Makefile) hecho (2026-10-22), salvo las pruebas cruzadas, que pasan al paso 7; paso 5 (`tiles`) hecho (2026-10-22), con las caídas de `ProcessModule`; paso 6, la suite de conformidad hecha (2026-10-22), y quedan las semanas de uso real; paso 7 (repositorios aparte) hecho (2026-10-22), salvo las pruebas cruzadas. Punto 46 de PROJECT.md §16.
 
+**Nota (2026-11-11):** el sistema de versiones y de descarga de módulos de este plan (contrato numerado, `contract-<n>`, `[modules.<módulo>] version` y `registry`, descarga al arrancar, `geko purge modules`) fue sustituido por [MODULE_UPDATES_PLAN.md](MODULE_UPDATES_PLAN.md): la versión del host decide los módulos, que van en la imagen según `modules.lock`. Los pasos de abajo se conservan como historia; las secciones «Versiones y compatibilidad» y «Descarga y verificación» describen ya el sistema actual.
+
 ## Objetivo
 
 Que cada módulo funcional (hoy `geocoder`; después `tiles` y otros) sea un **paquete que el host descarga y carga en tiempo de ejecución**, como hoy los packs de país, en vez de compilarse dentro del binario. A medio plazo, el geocoder vivirá en su propio repositorio, `candymaps/geko-geocoder`, y `candymaps/geko` (el host) lo bajará de sus packages cuando `geko.toml` lo active (`[modules] geocoder = true`).
@@ -20,10 +22,10 @@ Regla: **si un tipo, un dato o un puerto solo tiene sentido para un módulo, viv
 
 ## La SDK (el contrato)
 
-La define y la publica el host, en su propio repositorio (`candymaps/geko`): el puerto pertenece a quien lo consume. Cada módulo depende de ella y la implementa. GitHub Packages no tiene registro de Cargo, así que se publica como etiqueta de git del repositorio del host (`sdk-<n>`), y el módulo la usa como dependencia de git:
+La define y la publica el host, en su propio repositorio (`candymaps/geko`): el puerto pertenece a quien lo consume. Cada módulo depende de ella y la implementa. GitHub Packages no tiene registro de Cargo, así que se publica como etiqueta de git del repositorio del host (`sdk-v<versión>`, inmutable), y el módulo la usa como dependencia de git:
 
 ```toml
-geko-module-sdk = { git = "https://github.com/candymaps/geko", tag = "sdk-1" }
+geko-module-sdk = { git = "https://github.com/candymaps/geko", tag = "sdk-v2.0.0" }
 ```
 
 Si el repositorio del host es privado, la CI del módulo necesita un token de lectura. La SDK contiene solo:
@@ -56,7 +58,7 @@ Cada módulo tiene su propio fichero, `/etc/geko/geko-<módulo>.toml` (`geko-geo
 
 | Opción de hoy (`geko.toml`) | Pasa a |
 |---|---|
-| `[modules] geocoder`, `tiles` | Se quedan en `geko.toml`, con `[modules.<módulo>] version` y `registry` (nuevos) |
+| `[modules] geocoder`, `tiles` | Se quedan en `geko.toml` (`[modules.<módulo>]` solo admite `enabled` y `config`: `version` y `registry` se quitaron el 2026-11-11) |
 | `[[scope]]` (`country`, `regions`) | Se queda en `geko.toml`: es el ámbito de todos los módulos. El host solo comprueba los códigos ISO; que una región exista en el pack lo comprueba el geocoder |
 | `[data]` (todas) | Se quedan: las usa el `Downloader` del host |
 | `[sources.osm]`, `[sources.overture]`, `[sources.cartociudad]` y las demás fuentes | `geko-geocoder.toml`, `[sources.*]` |
@@ -124,28 +126,23 @@ Se implementan los dos dinámicos y se miden A/B con España completa (latencia,
 
 ## Versiones y compatibilidad
 
-- **El host fija el contrato, no la versión del módulo.** Cada release del host declara los contratos que entiende (p. ej. 2–3). Cada publicación del módulo lleva las etiquetas de su versión (`1.4.2`), de su commit y de su contrato (`contract-3`), que apunta al último módulo de ese contrato. Con el módulo activo, el host baja el último del contrato más alto que entiende: un arreglo del geocoder llega sin release del host.
-- **Versión fijada, opcional:** `[modules.geocoder] version = "1.4.2"` (producción, volver atrás). También `[modules.geocoder] registry`, por defecto `ghcr.io/candymaps/geko-geocoder`.
-- **El bundle fija la versión con la que se sirve.** El manifiesto guarda la versión exacta del módulo que lo generó (como hoy lleva el pack). `geko serve` usa esa y la baja si falta (es código, no fuentes: no rompe «serve nunca descarga fuentes»). En `geko up`, el build usa el último compatible (o el fijado) y, al pasar el bundle nuevo a `current`, el servicio cambia al módulo de ese bundle en la misma recarga. La versión fijada vale para generar; si difiere de la del bundle servido, aviso en el log.
-- **Versión incompatible con el host:**
-  1. Antes de descargar el binario, el host lee solo los metadatos de esa versión (anotaciones del manifiesto OCI o un `module.json` pequeño): contrato, plataforma, host mínimo. Si no encaja, error en `plan`, `fetch`, `build`, `up` y `serve`, antes de tocar fuentes, con las versiones compatibles y la salida («quita `version` para usar la última compatible»). Nunca se elige otra en silencio.
-  2. Tras descargar, se repite la comprobación con el manifiesto firmado.
-  3. Al cargar, saludo del adaptador: primer mensaje con el contrato, en los dos adaptadores dinámicos. Cubre también los módulos locales (`GEKO_MODULES`).
-  - Si el host deja de entender el contrato del bundle en servicio: no carga el nuevo y sigue con el que tiene (error en el log y en `/health`); si no hay ninguno cargado, `serve` no arranca y dice que hay que regenerar o volver a un host compatible. En `geko up`, una versión fijada incompatible hace fallar el build y se sigue sirviendo el bundle actual.
-- **Publicación del host:** en la CI del host, el trabajo `publish` de `ci.yml` comprueba en el registro, antes de publicar nada, que hay algún módulo publicado para cada contrato que declara el host. Si falta, no publica la imagen, ni crea la etiqueta `v<versión>`, ni la release de GitHub. Para no bloquearse al estrenar un contrato, el módulo se publica antes: su CI prueba con el host compilado desde la etiqueta de la SDK (`sdk-<n>`), no con una imagen publicada. Dejar de soportar un contrato es versión mayor del host, anunciada.
-- **Errores claros** para: ningún módulo del contrato, versión fijada inexistente, firma inválida, `offline` sin el módulo. Con el registro inalcanzable, la copia en disco.
-- `geko plan` muestra la versión de cada módulo, su contrato y si es fijada o la última compatible.
+- **La versión del host decide qué módulos lleva.** `modules.lock` fija el paquete exacto de cada módulo (versión, plataforma y digest de su manifiesto), y la imagen del host los lleva dentro. Ya no hay contrato numerado ni etiquetas `contract-<n>`; `[modules.<módulo>] version` y `registry` son un error con un mensaje claro.
+- **La compatibilidad se comprueba al publicar, no al cargar.** `modules.yml` carga cada `.so` real de `modules.lock`, pasa la suite de conformidad de la SDK y construye y sirve Luxemburgo (`ci/modules.sh verify`); `publish.yml` lo exige antes de publicar la imagen. El host no compara versiones al cargar un bundle.
+- **Cada módulo es independiente.** Carga, falla y responde por su cuenta: uno rechazado no tira a los demás, y no se reintenta un bundle rechazado. `/health`, `/ready` (`/ready?module=<módulo>` para uno) y la atribución van por módulo. Cada módulo valida el formato de sus datos al cargarlos. El build es independiente por módulo, y un build fallido conserva la parte de los que fallaron.
+- **La SDK tiene versión propia** (`sdk-v<versión>`, la misma en `geko-module-sdk`, `geko-fetch` y `geko-artifact`, desde `2.0.0`). La etiqueta no se mueve: si la SDK cambia sin subir la versión, `publish.yml` falla. Cada módulo la usa como dependencia de git y pasa a la nueva etiqueta cuando necesita el cambio.
+- **Actualizar un módulo:** el módulo se publica desde su repositorio; `modules-update.yml` (cada día, o a mano) abre el PR a `dev` que sube `modules.lock`; `modules.yml` lo comprueba; fusionarlo y luego `dev` en `main` es lo que publica el host.
+- `geko plan` muestra los módulos activos y de dónde salen.
 
 ## Descarga y verificación
 
 Lo genérico de `geko-country-pack` (`registry.rs`, `signature.rs`) pasa a un crate de artefactos firmados (`geko-artifact`, en el paso 3), que usan el host y, por la SDK, los módulos: OCI con etiquetas, firma ed25519 contra `TRUSTED_KEYS` y hash de cada fichero, copia en disco si el registro falla, `offline`, copias a mano sin `.digest`, directorio local sin descarga y `purge`. Sirve para:
 
-- **Módulos**, por plataforma (`linux-x86_64`), en `/var/lib/geko/modules/<módulo>/<versión>/`; `GEKO_MODULES` usa los locales y nunca descarga. Solo se ejecuta código firmado, salvo el de ese directorio local.
+- **Módulos**, por plataforma (`linux-x86_64`), que se bajan al construir la imagen (`ci/modules.sh pull`) por el digest de `modules.lock`; `GEKO_MODULES` usa esos y el host nunca descarga. Solo se ejecuta código firmado, salvo el de un directorio local.
 - **Paquetes de datos de un módulo** (los packs de país del geocoder), que baja el propio módulo dentro de su directorio. El formato de los packs (`format-2`) pasa a ser cosa del módulo.
 
-`geko purge modules` borra los módulos que ya no pide la configuración ni ningún bundle conservado, y `geko purge packages` los paquetes de datos de fuera del ámbito.
+El host ya no descarga módulos ni tiene `geko purge modules`; `geko purge packages` sigue borrando los paquetes de datos de fuera del ámbito.
 
-**Imagen de Docker del host sin módulos.** La imagen `ghcr.io/candymaps/geko` es solo el host; los módulos no son imágenes de Docker, sino artefactos OCI (`ghcr.io/candymaps/geko-geocoder`), como los packs. Al arrancar, baja al volumen (`/var/lib/geko/modules/`) los que estén activos en `geko.toml`, como hoy los packs del ámbito; uno desactivado no se baja. En los arranques siguientes usa la copia del volumen, y con el registro inalcanzable arranca con ella. Sin copia y sin red, o con `offline` y sin el módulo, no arranca y lo dice. La imagen no cambia al publicar un módulo: solo con el código del host.
+**Imagen de Docker del host con sus módulos** (desde el 2026-11-11, MODULE_UPDATES_PLAN.md, fase 3). La imagen `ghcr.io/candymaps/geko` lleva dentro los paquetes de `modules.lock`, ya verificados (`ci/modules.sh pull` en su etapa `modules`), y fija `GEKO_MODULES`. Los módulos siguen siendo artefactos OCI firmados (`ghcr.io/candymaps/geko-<módulo>`), publicados desde su repositorio, pero el host ya no los baja al arrancar: elegir la versión del host elige los módulos. Subir un módulo exige subir `modules.lock` (lo propone `modules-update.yml`) y publicar el host.
 
 **Idiomas.** Siguen compilados dentro del binario del geocoder (`include_str!` en `text-rules`), así que se descargan con él. Pasarlos a un paquete de datos, como los packs, solo compensa si hay que actualizar un idioma sin sacar una versión del geocoder.
 

@@ -16,7 +16,7 @@ the contract of `geko-module-sdk`.
 
 ## The whole cycle is automatic
 
-`geko.toml` declares the scope and the modules. geko downloads the modules, asks each one to download and
+`geko.toml` declares the scope and the modules. geko loads the modules of its version, asks each one to download and
 build its part for the scope, publishes the bundle and serves it. See
 [Data and bundles]({% link data-and-bundles.md %}).
 
@@ -27,7 +27,7 @@ or hours, and serving needs little.
 
 ```
  build node
-   geko.toml -> active modules -> open each one (linked, GEKO_MODULES or signed download)
+   geko.toml -> active modules -> open each one (linked or GEKO_MODULES)
              -> plan / fetch / build of each module (the Downloader of the host,
                 its part of the bundle)
              -> bundle vN/ (the parts of the modules + manifest.json) -> publication
@@ -49,13 +49,13 @@ or hours, and serving needs little.
   other, and a new one does not touch the routes of the others.
 - **Own configuration**, `geko-<module>.toml`, beside `geko.toml`: the host does not read it, it passes it
   on.
-- **A module that is disabled costs nothing:** it is not downloaded, not instantiated, opens no files and
+- **A module that is disabled costs nothing:** it is not instantiated, opens no files and
   registers no routes.
 - **Origin of a module**, in this order: linked into the binary (none, in the binary of this repository; a
   module can link itself with `geko_app::main` for its own checks); a folder of `GEKO_MODULES`, loaded as a
-  library (`kind = "dylib"`); or downloaded and signed from `ghcr.io/candymaps/geko-<module>`.
-- **Partial bundles.** The manifest of a bundle says which modules it holds. `geko serve` uses the
-  version of each module that built the bundle it serves, and downloads it if missing.
+  library (`kind = "dylib"`). The image of geko carries the signed modules of its `modules.lock` and sets
+  `GEKO_MODULES`; geko downloads none.
+- **Partial bundles.** The manifest of a bundle says which modules it holds.
 
 To write one, see [Writing a module]({% link writing-a-module.md %}).
 
@@ -106,22 +106,22 @@ geko/
 ```
 
 `geko-module-sdk`, `geko-fetch` and `geko-artifact` are the git dependencies of the modules, at the tag
-`sdk-<contract>`.
+`sdk-v<version>`.
 
 ## Versions and compatibility
 
-- **The host fixes the contract, not the version of the module.** Each release of the host declares the
-  contracts it understands. With a module active, the host downloads the newest one of the highest
-  contract it understands: a fix to the geocoder arrives without a release of the host.
-- **A pinned version** is optional: `[modules.geocoder] version = "1.4.2"` (production, going back).
+- **The version of the host decides the modules.** `modules.lock` fixes the exact package of each one
+  (version, platform and digest), and the image carries them. Raising a module means raising
+  `modules.lock` (a daily workflow proposes the pull request) and publishing the host.
+- **Compatibility is checked when publishing,** not when loading: the checks run the real modules of
+  `modules.lock` through the conformance suite and a build and serve of Luxembourg, and nothing is
+  published until they pass. The host compares no version when it loads a bundle.
+- **The SDK has its own version** (`sdk-v<version>`), the same in its three crates. A module moves to a
+  new tag when it needs the change.
 - **Each module judges its own part of a bundle.** Its manifest keeps the exact version of the module that
   built it, as a record: `geko serve` does not compare it. The module loads what it can read, and rejects
   the rest. One that rejects a bundle goes on with the one it had, and the others load it.
-- **A version that does not fit the host** is an error in `plan`, `fetch`, `build`, `up` and `serve`,
-  before touching any source, with the compatible versions and the way out: remove `version` to use the
-  newest compatible one. geko never chooses another one silently.
-- `geko plan` shows the version of each module, its contract and whether it is pinned or the newest
-  compatible one.
+- `geko plan` shows the version of each active module and where it comes from.
 
 ## Platforms
 
