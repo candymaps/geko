@@ -3,6 +3,6 @@
 # modules-update.yml changes this file.
 #
 # <module> <version> <platform> <digest of its manifest>
-geocoder 0.3.1 linux-x86_64 sha256:49bc56359f0467cdc3033e838364ec7136e6c63a9f1ca9df7da9e3a21e8c8e09
-tiles 0.4.0 linux-x86_64 sha256:d15dc450d94f58a81d532337bffa89cf49746dd81b468bd006e50d57159665e9
-router 0.2.0 linux-x86_64 sha256:441a3b331d68c6d4fefd8b5fe6cce5d1cc79d6a9a65013a6c451561d8bb0c185
+geocoder 0.4.0 linux-x86_64 sha256:7fe8298a71e25f99ca5498d0ca0ae1d8cff35a44548ae27f5e158117c5fc05b8
+tiles 0.5.0 linux-x86_64 sha256:d211e8cb7abffdf45c5e962ff2a74d20d9a369feccd7a9fc59f7876f7f0256b7
+router 0.3.0 linux-x86_64 sha256:d9eb4bafdb5ca64876aaf47ac59c3c91d95426f7687572a3df73d3c31d47984f
