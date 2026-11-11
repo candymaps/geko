@@ -799,7 +799,7 @@ dependencies = [
 
 [[package]]
 name = "geko-artifact"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "ed25519-dalek",
  "geko-fetch",
@@ -814,7 +814,7 @@ dependencies = [
 
 [[package]]
 name = "geko-fetch"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "geko-module-sdk",
  "hex",
@@ -841,7 +841,7 @@ dependencies = [
 
 [[package]]
 name = "geko-module-sdk"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "hex",
  "serde",
