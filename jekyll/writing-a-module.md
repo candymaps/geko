@@ -7,7 +7,7 @@ nav_order: 3
 # Writing a module
 {: .no_toc }
 
-A module is a package that the host downloads and loads at run time. It lives in its own repository, is
+A module is a package that the host loads at run time. It lives in its own repository, is
 published at its own pace, and meets the contract of `geko-module-sdk`. The
 [geocoder]({% link geocoder.md %}) and [tiles]({% link tiles.md %}) are the two existing examples.
 
@@ -18,10 +18,10 @@ published at its own pace, and meets the contract of `geko-module-sdk`. The
 
 The SDK is defined and published by the host, in `candymaps/geko`: the port belongs to whoever consumes
 it. GitHub Packages has no Cargo registry, so it is published as a git tag of the host repository,
-`sdk-<contract>`, and the module uses it as a git dependency:
+`sdk-v<version>`, which never moves, and the module uses it as a git dependency:
 
 ```toml
-geko-module-sdk = { git = "https://github.com/candymaps/geko", tag = "sdk-1" }
+geko-module-sdk = { git = "https://github.com/candymaps/geko", tag = "sdk-v2.0.0" }
 ```
 
 If the repository of the host is private, the CI of the module needs a read token.
@@ -32,7 +32,7 @@ The `Module` trait, in `crates/geko-module-sdk/src/module.rs`, has these parts:
 
 | Part | What it is for |
 |---|---|
-| `describe` | Name, version, contract, platform, optional capabilities, the HTTP routes it serves (method, pattern, whether they go to the search pool, whether they are public without an API key), its home page, its `openapi.yaml`, what it adds to `/v1/attribution`, and its commands. |
+| `describe` | Name, version, platform, optional capabilities, the HTTP routes it serves (method, pattern, whether they go to the search pool, whether they are public without an API key), its home page, its `openapi.yaml`, what it adds to `/v1/attribution`, and its commands. |
 | `plan`, `fetch` | From the scope and its configuration to the data that is needed, downloaded with the `Downloader` that the host offers (cache, `offline`, licenses, parallel downloads). |
 | `prepare` | What the commands that build need (the geocoder downloads here the country packs of the scope). |
 | `build` | Its stages per country, with their stamps in its own work directory, and the parts of the bundle it leaves, their licenses and metadata. The host publishes them as opaque files (path, hash, size). Afterwards, `published` and `next_build` (when to build again in `geko up`). |
@@ -67,13 +67,13 @@ side frees its own memory. So the host and the module can be built with differen
 - Build the library in a separate crate, so that linking the module into the host does not also build the
   `cdylib`.
 - Declare `mimalloc` in the library of the module. Without it, the module loses what mimalloc gained.
-- A package has a `module.toml` with `kind = "dylib"`, `name`, `version`, `contract`, `platform` and
+- A package has a `module.toml` with `kind = "dylib"`, `name`, `version`, `platform` and
   `entry` (the library).
 
 ### Trying it locally
 
-`GEKO_MODULES` is a directory with one folder per module (`<module>/module.toml`). It replaces linking
-and downloading, and a module that is not there is an error, never a download.
+`GEKO_MODULES` is a directory with one folder per module (`<module>/module.toml`). It replaces linking,
+and a module that is not there is an error.
 
 A module can also be linked into the host for its own checks (the golden, valgrind), through
 `geko_app::main(linked)`, without the host depending on it.
@@ -83,16 +83,17 @@ A module can also be linked into the host for its own checks (the golden, valgri
 A module publishes itself from its own repository, as a signed OCI artifact in
 `ghcr.io/candymaps/geko-<module>`:
 
-- tags `<version>-<platform>` and `contract-<n>-<platform>` (the latter points to the newest module of that
-  contract), and the annotations `geko.version`, `geko.contract` and `geko.platform`;
+- the tag `<version>-<platform>` and the annotations `geko.*`;
 - the version is `<version>-<commit>`, or `<version>` in a release, and it is compiled in with
   `GEKO_MODULE_VERSION` (`module_version!` of the SDK);
 - the `module.toml` and the package are signed with `geko-module-sign` (`geko-artifact`).
 
-Before downloading anything, the host reads only the annotations of a version: contract and platform. If
-they do not fit, it fails before touching the sources. After the download it checks the signature, and on
-opening, the greeting of the adapter, which is the first message and carries the contract. See
+The host does not download the module: it goes into the image of a version of geko when its package is
+added to `modules.lock` (the daily `modules-update` workflow proposes it, and the checks run the real
+package before anything is published). The signature is checked when the image is built. See
 [Security and licenses]({% link security.md %}).
+
+The module validates the format of its own data when it loads, and rejects what it cannot read.
 
 ## The conformance suite
 
@@ -104,7 +105,7 @@ geko_module_sdk::conformance::module::check
 
 It runs over a module opened with an empty scope and no bundle, and checks that:
 
-- `describe` carries the contract of the SDK, a version, and valid routes with no repeats;
+- `describe` carries a version, and valid routes with no repeats;
 - its `openapi` is one of its GET routes;
 - commands do not repeat, and an unknown one is an error;
 - no progress is reported outside a build;
@@ -115,16 +116,13 @@ It runs over a module opened with an empty scope and no bundle, and checks that:
 
 A new requirement of the contract goes into this suite.
 
-## Changing the contract
+## Changing the SDK
 
-The contract is small and additive. A change that breaks it raises `CONTRACT` (in `module.rs`), and every
-module listed in `ci/modules` must follow before it is merged:
+The contract is small and additive. A change to the SDK raises its version, the same in `geko-module-sdk`,
+`geko-fetch` and `geko-artifact`, and `publish.yml` creates the tag `sdk-v<version>` when the host reaches
+`main`; if the SDK changes without raising the version, `publish.yml` fails.
 
-1. Open the pull request of the host.
-2. Point each module to its commit (`rev`).
-3. Publish each module, and run the checks of the pull request again: `ci/modules.sh check` must pass.
-4. Merge it with a **merge commit**. A squash would orphan the `rev` of the modules.
-5. Move the modules to the new tag `sdk-<contract>`.
-
-Neither `dev` nor `main` accepts a contract that a module does not speak yet. The host does not publish
-its image, its tag or its release until a module is published for each contract it declares.
+The published modules keep working until they need the change: each one moves to the new tag in its own
+repository, and is published. The host compares no version when it loads a module, so a module on an
+older tag is not rejected; what protects the host is that nothing is published until the real modules of
+`modules.lock` pass the conformance suite and a build and serve of Luxembourg.

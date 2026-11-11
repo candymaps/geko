@@ -18,23 +18,21 @@ The modules available:
 
 To write a new one, see [Writing a module]({% link writing-a-module.md %}).
 
-## Download and loading
+## Loading
 
-Without `GEKO_MODULES`, a module is downloaded into
-`/var/lib/geko/modules/<module>/<version>/` from `ghcr.io/candymaps/geko-<module>`: the newest one
-for the contract of `geko`, or the one set by `[modules.<module>] version`. Modules are signed.
-`geko plan` says which version is used and where it comes from.
+geko downloads no module. The image of each version carries the modules of its `modules.lock`, signed,
+and sets `GEKO_MODULES`, so the version of geko decides which ones it runs. A module that is active and
+is neither there nor linked in is an error.
 
-A module that is disabled is not downloaded, not instantiated, opens no files and registers no
-routes.
+Each module loads, fails and answers on its own: one that rejects its data does not stop the others
+(`/health`, `/ready`, and `/ready?module=<module>` for a single one).
 
-`geko purge modules` removes the modules that no active module or kept bundle uses.
+A module that is disabled is not instantiated, opens no files and registers no routes.
 
 ## Local development
 
 `GEKO_MODULES` points to one directory per module, each with its `module.toml`. The module is then
-loaded as a library into the process of `geko`, and a module that is not there is an error, never
-a download.
+loaded as a library into the process of `geko`, and a module that is not there is an error.
 
 ## Options
 
